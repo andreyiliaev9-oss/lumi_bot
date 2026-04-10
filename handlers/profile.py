@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import Message
 from datetime import date
 from sqlalchemy import select, func
 from db.db import async_session
@@ -12,21 +12,21 @@ router = Router()
 async def show_profile(message: Message):
     tg_id = message.from_user.id
     
-    # Получаем фото пользователя из Telegram (с обработкой ошибки)
     avatar = None
     try:
         photos = await message.bot.get_user_profile_photos(tg_id, limit=1)
         if photos.total_count > 0:
             avatar = photos.photos[0][-1].file_id
     except:
-        avatar = None
+        pass
     
     async with async_session() as session:
-        user = await session.get(User, tg_id)
+        result = await session.execute(select(User).where(User.tg_id == tg_id))
+        user = result.scalar_one_or_none()
         if not user:
             await message.answer("Ошибка: пользователь не найден")
             return
-            
+        
         habits_done = await session.scalar(select(func.count(HabitLog.id)).where(HabitLog.user_id == user.id, HabitLog.completed == True))
         habits_skipped = await session.scalar(select(func.count(HabitLog.id)).where(HabitLog.user_id == user.id, HabitLog.skipped == True))
         events_done = await session.scalar(select(func.count(Event.id)).where(Event.user_id == user.id, Event.date < date.today()))
