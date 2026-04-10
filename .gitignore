@@ -1,0 +1,40 @@
+# Виртуальное окружение Python
+venv/
+env/
+.venv/
+
+# Файлы кэша Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Переменные окружения с секретами (токен, пароли)
+.env
+.env.local
+.env.production
+
+# База данных (SQLite)
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+data/*.sqlite
+
+# Логи
+*.log
+
+# IDE и редакторы
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Файлы сборки и дистрибуции
+dist/
+build/
+*.egg-info/
+
+# OS метаданные
+.DS_Store
+Thumbs.db
