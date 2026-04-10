@@ -4,7 +4,6 @@ DB_NAME = "lumi_database.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_NAME) as db:
-        # Таблица пользователей (добавили gender)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -16,7 +15,6 @@ async def init_db():
                 is_registered INTEGER DEFAULT 0
             )
         """)
-        # Таблица разовых задач
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tasks (
                 task_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,7 +24,6 @@ async def init_db():
                 is_notified INTEGER DEFAULT 0
             )
         """)
-        # Таблица привычек
         await db.execute("""
             CREATE TABLE IF NOT EXISTS habits (
                 habit_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +31,7 @@ async def init_db():
                 title TEXT,
                 remind_time TEXT,
                 streak INTEGER DEFAULT 0,
-                last_completed DATE
+                last_completed DATE DEFAULT '2000-01-01'
             )
         """)
         await db.commit()
