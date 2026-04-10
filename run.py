@@ -2,6 +2,7 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 from handlers import register_all_handlers
 from db.db import init_db
 from services.scheduler import setup_scheduler
@@ -10,7 +11,7 @@ from config import BOT_TOKEN
 logging.basicConfig(level=logging.INFO)
 
 async def main():
-    bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
     await init_db()
     register_all_handlers(dp)
