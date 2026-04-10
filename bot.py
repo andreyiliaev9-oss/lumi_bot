@@ -23,10 +23,16 @@ bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 scheduler = AsyncIOScheduler(timezone=MOSCOW_TZ)
 
+# --- СОСТОЯНИЯ ---
 class RegisterStates(StatesGroup):
     waiting_for_name = State()
+    waiting_for_gender = State()
 
 class TaskStates(StatesGroup):
+    waiting_for_title = State()
+    waiting_for_time = State()
+
+class HabitStates(StatesGroup):
     waiting_for_title = State()
     waiting_for_time = State()
 
@@ -38,74 +44,68 @@ def main_menu():
         [KeyboardButton(text="🔄 Привычки"), KeyboardButton(text="🔒 Приватное")]
     ], resize_keyboard=True)
 
-# --- РЕГИСТРАЦИЯ ---
+def gender_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Мужской 👨", callback_data="gender_m"),
+         InlineKeyboardButton(text="Женский 👩", callback_data="gender_f")]
+    ])
+
+# --- РЕГИСТРАЦИЯ С ПОЛОМ ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute("SELECT is_registered FROM users WHERE user_id = ?", (message.from_user.id,)) as cursor:
             user = await cursor.fetchone()
         
-        if not user:
-            await db.execute("INSERT INTO users (user_id, username, is_registered) VALUES (?, ?, 0)", 
+        if not user or user[0] == 0:
+            await db.execute("INSERT OR IGNORE INTO users (user_id, username, is_registered) VALUES (?, ?, 0)", 
                              (message.from_user.id, message.from_user.username))
             await db.commit()
             await message.answer("✨ Добро пожаловать в ЛЮМИ. Как мне к тебе обращаться?")
             await state.set_state(RegisterStates.waiting_for_name)
-        elif user[0] == 0:
-            await message.answer("Как мне к тебе обращаться?")
-            await state.set_state(RegisterStates.waiting_for_name)
         else:
-            await message.answer("Система ЛЮМИ активна. Твой путь к гармонии продолжается.", reply_markup=main_menu())
+            await message.answer("Система активна.", reply_markup=main_menu())
 
 @dp.message(RegisterStates.waiting_for_name)
-async def register_name(message: types.Message, state: FSMContext):
-    name = message.text
+async def reg_name(message: types.Message, state: FSMContext):
+    await state.update_data(name=message.text)
+    await message.answer(f"Приятно познакомиться, {message.text}! Теперь укажи свой пол:", reply_markup=gender_kb())
+    await state.set_state(RegisterStates.waiting_for_gender)
+
+@dp.callback_query(RegisterStates.waiting_for_gender)
+async def reg_gender(callback: types.CallbackQuery, state: FSMContext):
+    gender = "m" if callback.data == "gender_m" else "f"
+    data = await state.get_data()
     async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("UPDATE users SET first_name = ?, is_registered = 1 WHERE user_id = ?", 
-                         (name, message.from_user.id))
+        await db.execute("UPDATE users SET first_name = ?, gender = ?, is_registered = 1 WHERE user_id = ?", 
+                         (data['name'], gender, callback.from_user.id))
         await db.commit()
-    await message.answer(f"Приятно познакомиться, {name}! Теперь всё готово к работе.", reply_markup=main_menu())
+    await callback.message.delete()
+    await callback.message.answer(f"Всё готово, {data['name']}! Теперь ты в системе.", reply_markup=main_menu())
     await state.clear()
 
 # --- ПРОФИЛЬ ---
 @dp.message(F.text == "👤 Профиль")
 async def show_profile(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("SELECT first_name, streak_days, joined_date FROM users WHERE user_id = ?", (message.from_user.id,)) as cursor:
+        async with db.execute("SELECT first_name, streak_days, joined_date, gender FROM users WHERE user_id = ?", (message.from_user.id,)) as cursor:
             row = await cursor.fetchone()
-    
     if row:
-        name, streak, joined = row
-        text = (
-            f"👤 ПРОФИЛЬ: {name}\n"
-            f"────────────────────\n"
-            f"🎖 Ранг: Исследователь\n"
-            f"🔥 Серия: {streak} дн.\n"
-            f"📅 С нами с: {joined[:10]}\n"
-            f"────────────────────"
-        )
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏆 Достижения", callback_data="dev"), InlineKeyboardButton(text="📊 Статистика", callback_data="dev")]
-        ])
-        try:
-            photos = await bot.get_user_profile_photos(message.from_user.id, limit=1)
-            if photos.total_count > 0:
-                await message.answer_photo(photos.photos[0][-1].file_id, caption=text, reply_markup=kb)
-            else:
-                await message.answer(text, reply_markup=kb)
-        except:
-            await message.answer(text, reply_markup=kb)
+        name, streak, joined, gender = row
+        g_label = "Мужчина" if gender == "m" else "Женщина"
+        text = f"👤 ПРОФИЛЬ: {name}\nПол: {g_label}\nСерия: {streak} дн.\nС нами с: {joined[:10]}"
+        await message.answer(text)
 
-# --- ПЛАНИРОВЩИК ---
+# --- ПЛАНИРОВЩИК (СТАРЫЙ) ---
 @dp.message(F.text == "🗓 Планировщик")
 async def plan_start(message: types.Message, state: FSMContext):
-    await message.answer("📝 Какое дело запланируем? (Напиши название)")
+    await message.answer("📝 Название задачи:")
     await state.set_state(TaskStates.waiting_for_title)
 
 @dp.message(TaskStates.waiting_for_title)
 async def plan_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text)
-    await message.answer("📅 На какой день и время? (Напиши в формате: 10.04 18:00)")
+    await message.answer("📅 Время (ДД.ММ ЧЧ:ММ):")
     await state.set_state(TaskStates.waiting_for_time)
 
 @dp.message(TaskStates.waiting_for_time)
@@ -117,36 +117,97 @@ async def plan_time(message: types.Message, state: FSMContext):
             await db.execute("INSERT INTO tasks (user_id, title, task_time) VALUES (?, ?, ?)",
                              (message.from_user.id, data['title'], dt.strftime("%Y-%m-%d %H:%M:00")))
             await db.commit()
-        await message.answer(f"✅ Записано: «{data['title']}» на {message.text}")
+        await message.answer(f"✅ Задача создана!")
         await state.clear()
-    except:
-        await message.answer("❌ Неверный формат. Попробуй еще раз (например, 12.04 15:30):")
+    except: await message.answer("Ошибка формата!")
 
-# --- ЗАГЛУШКИ ДЛЯ ОСТАЛЬНЫХ КНОПОК ---
-@dp.message(F.text.in_({"🌸 Комплимент", "🆘 Поддержка", "🔄 Привычки", "🔒 Приватное"}))
-async def development_msg(message: types.Message):
-    await message.answer("🛠 Этот раздел сейчас находится в разработке.")
-
-@dp.callback_query(F.data == "dev")
-async def dev_callback(callback: types.CallbackQuery):
-    await callback.answer("Скоро здесь что-то будет! 🛠", show_alert=True)
-
-# --- ПРОВЕРКА ЗАДАЧ ---
-async def check_tasks():
-    now = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:00")
+# --- ПРИВЫЧКИ (НОВОЕ) ---
+@dp.message(F.text == "🔄 Привычки")
+async def habit_menu(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("SELECT task_id, user_id, title FROM tasks WHERE task_time <= ? AND is_notified = 0", (now,)) as cursor:
-            tasks = await cursor.fetchall()
-            for tid, uid, title in tasks:
+        async with db.execute("SELECT COUNT(*) FROM habits WHERE user_id = ?", (message.from_user.id,)) as cursor:
+            count = (await cursor.fetchone())[0]
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➕ Добавить (До 5)", callback_data="add_habit")]])
+    await message.answer(f"Твои привычки (Активно: {count}/5).", reply_markup=kb)
+
+@dp.callback_query(F.data == "add_habit")
+async def add_habit_start(callback: types.CallbackQuery, state: FSMContext):
+    async with aiosqlite.connect(DB_NAME) as db:
+        async with db.execute("SELECT COUNT(*) FROM habits WHERE user_id = ?", (callback.from_user.id,)) as cursor:
+            if (await cursor.fetchone())[0] >= 5:
+                return await callback.answer("Лимит 5 привычек!", show_alert=True)
+    await callback.message.answer("📝 Название привычки:")
+    await state.set_state(HabitStates.waiting_for_title)
+
+@dp.message(HabitStates.waiting_for_title)
+async def habit_title(message: types.Message, state: FSMContext):
+    await state.update_data(title=message.text)
+    await message.answer("⏰ Время напоминания (ЧЧ:ММ):")
+    await state.set_state(HabitStates.waiting_for_time)
+
+@dp.message(HabitStates.waiting_for_time)
+async def habit_time(message: types.Message, state: FSMContext):
+    try:
+        datetime.strptime(message.text, "%H:%M")
+        data = await state.get_data()
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("INSERT INTO habits (user_id, title, remind_time) VALUES (?, ?, ?)",
+                             (message.from_user.id, data['title'], message.text))
+            await db.commit()
+        await message.answer(f"✅ Привычка «{data['title']}» добавлена!")
+        await state.clear()
+    except: await message.answer("Формат: ЧЧ:ММ")
+
+# --- ФОНОВЫЕ ПРОВЕРКИ ---
+async def check_everything():
+    now_full = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d %H:%M:00")
+    now_time = datetime.now(MOSCOW_TZ).strftime("%H:%M")
+    
+    async with aiosqlite.connect(DB_NAME) as db:
+        # 1. Разовые задачи
+        async with db.execute("SELECT task_id, user_id, title FROM tasks WHERE task_time <= ? AND is_notified = 0", (now_full,)) as cursor:
+            for tid, uid, title in await cursor.fetchall():
                 try:
-                    await bot.send_message(uid, f"🔔 НАПОМИНАНИЕ: {title}")
+                    await bot.send_message(uid, f"🔔 ЗАДАЧА: {title}")
                     await db.execute("UPDATE tasks SET is_notified = 1 WHERE task_id = ?", (tid,))
                 except: pass
+        
+        # 2. Дневные напоминания о привычках
+        async with db.execute("SELECT user_id, title FROM habits WHERE remind_time = ?", (now_time,)) as cursor:
+            for uid, title in await cursor.fetchall():
+                try: await bot.send_message(uid, f"💡 Пора сделать: {title}")
+                except: pass
+        
+        # 3. Вечерний опрос (19:00)
+        if now_time == "19:00":
+            async with db.execute("SELECT h.habit_id, h.user_id, h.title, u.gender, u.first_name FROM habits h JOIN users u ON h.user_id = u.user_id") as cursor:
+                for hid, uid, title, gender, name in await cursor.fetchall():
+                    word = "сделал" if gender == "m" else "сделала"
+                    kb = InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="✅ Да", callback_data=f"h_done_{hid}"),
+                        InlineKeyboardButton(text="❌ Нет", callback_data=f"h_no")
+                    ]])
+                    try: await bot.send_message(uid, f"❓ {name}, ты сегодня {word} привычку: {title}?", reply_markup=kb)
+                    except: pass
         await db.commit()
+
+@dp.callback_query(F.data.startswith("h_done_"))
+async def habit_done(callback: types.CallbackQuery):
+    hid = callback.data.split("_")[2]
+    today = datetime.now(MOSCOW_TZ).date().isoformat()
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("UPDATE habits SET streak = streak + 1, last_completed = ? WHERE habit_id = ?", (today, hid))
+        await db.commit()
+    await callback.message.edit_text("🔥 Красава! Серия продлена.")
+
+@dp.callback_query(F.data == "h_no")
+async def habit_not_done(callback: types.CallbackQuery):
+    await callback.message.edit_text("Нужно дожать! Еще есть время до конца дня.")
 
 async def main():
     await init_db()
-    scheduler.add_job(check_tasks, "interval", minutes=1)
+    scheduler.add_job(check_everything, "interval", minutes=1)
     scheduler.start()
     await dp.start_polling(bot)
 
