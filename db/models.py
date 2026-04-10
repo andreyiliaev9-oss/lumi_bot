@@ -21,6 +21,7 @@ class User(Base):
     cycle_length = Column(Integer, nullable=True)
     period_length = Column(Integer, nullable=True)
     pin_hash = Column(String, nullable=True)
+    last_pms_notification = Column(Date, nullable=True)  # для предотвращения дублирования
 
 class Habit(Base):
     __tablename__ = 'habits'
@@ -52,6 +53,29 @@ class Event(Base):
     time = Column(String, nullable=True)
     notify_before = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
+
+class CycleLog(Base):
+    __tablename__ = 'cycle_logs'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'))
+    date = Column(Date, default=datetime.now().date)
+    mood = Column(Integer, nullable=True)      # 1-5
+    pain = Column(Integer, nullable=True)      # 1-5
+    energy = Column(Integer, nullable=True)    # 1-5
+    sleep = Column(Integer, nullable=True)     # 1-5
+    headache = Column(Boolean, default=False)  # головная боль
+    bloating = Column(Boolean, default=False)  # вздутие
+    acne = Column(Boolean, default=False)      # акне
+    notes = Column(Text, nullable=True)
+
+class CycleTip(Base):
+    __tablename__ = 'cycle_tips'
+    id = Column(Integer, primary_key=True)
+    phase = Column(String)  # 'menstruation', 'follicular', 'ovulation', 'luteal'
+    tip = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
 class DiaryEntry(Base):
     __tablename__ = 'diary'
