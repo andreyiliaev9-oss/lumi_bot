@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from sqlalchemy import select, delete
 from db.db import async_session
 from db.models import Event
@@ -42,21 +42,21 @@ async def event_title(message: Message, state: FSMContext):
 async def event_desc(message: Message, state: FSMContext):
     desc = message.text if message.text != "-" else ""
     await state.update_data(description=desc)
-    await message.answer("Введите дату в формате ГГГГ-ММ-ДД (например, 2025-12-31)")
+    await message.answer("Введите дату в формате <b>ДД.ММ.ГГГГ</b> (например, 31.12.2025):")
     await state.set_state(EventForm.date)
 
 @router.message(EventForm.date)
 async def event_date(message: Message, state: FSMContext):
     try:
-        event_date = datetime.strptime(message.text, "%Y-%m-%d").date()
-        if event_date < datetime.now().date():
+        event_date = datetime.strptime(message.text, "%d.%m.%Y").date()
+        if event_date < date.today():
             await message.answer("⚠️ Дата не может быть в прошлом. Введите корректную дату.")
             return
     except:
-        await message.answer("❌ Неверный формат. Используйте ГГГГ-ММ-ДД")
+        await message.answer("❌ Неверный формат. Используйте <b>ДД.ММ.ГГГГ</b>, например 31.12.2025")
         return
     await state.update_data(date=event_date)
-    await message.answer("Введите время в формате ЧЧ:ММ (или '-' если без времени)")
+    await message.answer("Введите время в формате <b>ЧЧ:ММ</b> (или '-' если без времени):")
     await state.set_state(EventForm.time)
 
 @router.message(EventForm.time)
@@ -101,7 +101,7 @@ async def event_notify(callback: CallbackQuery, state: FSMContext):
 async def list_events(callback: CallbackQuery):
     async with async_session() as session:
         events = await session.execute(
-            select(Event).where(Event.user_id == callback.from_user.id, Event.date >= datetime.now().date())
+            select(Event).where(Event.user_id == callback.from_user.id, Event.date >= date.today())
             .order_by(Event.date, Event.time)
         )
         events_list = events.scalars().all()
@@ -109,11 +109,12 @@ async def list_events(callback: CallbackQuery):
             text = "📭 Нет предстоящих событий."
             await callback.message.edit_text(text, reply_markup=back_button("planner"))
         else:
-            # Создаём клавиатуру со списком событий для выбора действия
             kb = InlineKeyboardMarkup(inline_keyboard=[])
             for ev in events_list:
+                # Форматируем дату в ДД.ММ.ГГГГ
+                date_str = ev.date.strftime("%d.%m.%Y")
                 kb.inline_keyboard.append([InlineKeyboardButton(
-                    text=f"📌 {ev.title} ({ev.date})",
+                    text=f"📌 {ev.title} ({date_str})",
                     callback_data=f"event_{ev.id}"
                 )])
             kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="planner")])
@@ -128,7 +129,8 @@ async def manage_event(callback: CallbackQuery):
         if not event or event.user_id != callback.from_user.id:
             await callback.answer("Событие не найдено")
             return
-        text = f"📌 <b>{event.title}</b>\n📝 {event.description or 'Нет описания'}\n📅 {event.date}"
+        date_str = event.date.strftime("%d.%m.%Y")
+        text = f"📌 <b>{event.title}</b>\n📝 {event.description or 'Нет описания'}\n📅 {date_str}"
         if event.time:
             text += f" в {event.time}"
         if event.notify_before:
@@ -150,7 +152,6 @@ async def delete_event(callback: CallbackQuery):
             await session.delete(event)
             await session.commit()
             await callback.answer("🗑 Событие удалено")
-            # Возвращаемся к списку
             await list_events(callback)
         else:
             await callback.answer("Ошибка")
