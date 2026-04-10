@@ -1,6 +1,7 @@
 from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
+from sqlalchemy import select
 from db.db import async_session
 from db.models import User
 from keyboards.reply import main_reply_menu
@@ -12,7 +13,8 @@ router = Router()
 async def cmd_start(message: Message):
     tg_id = message.from_user.id
     async with async_session() as session:
-        user = await session.get(User, tg_id)
+        result = await session.execute(select(User).where(User.tg_id == tg_id))
+        user = result.scalar_one_or_none()
         if not user:
             user = User(tg_id=tg_id, name=message.from_user.full_name)
             session.add(user)
