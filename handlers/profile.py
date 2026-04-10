@@ -4,7 +4,6 @@ from datetime import date
 from sqlalchemy import select, func
 from db.db import async_session
 from db.models import User, HabitLog, Event, DiaryEntry
-from keyboards.inline import back_button
 from keyboards.reply import main_reply_menu
 
 router = Router()
@@ -12,12 +11,22 @@ router = Router()
 @router.message(F.text == "👤 Профиль")
 async def show_profile(message: Message):
     tg_id = message.from_user.id
-    # Получаем фото пользователя из Telegram
-    photos = await message.bot.get_user_profile_photos(tg_id, limit=1)
-    avatar = photos.photos[0][-1].file_id if photos.total_count > 0 else None
+    
+    # Получаем фото пользователя из Telegram (с обработкой ошибки)
+    avatar = None
+    try:
+        photos = await message.bot.get_user_profile_photos(tg_id, limit=1)
+        if photos.total_count > 0:
+            avatar = photos.photos[0][-1].file_id
+    except:
+        avatar = None
     
     async with async_session() as session:
         user = await session.get(User, tg_id)
+        if not user:
+            await message.answer("Ошибка: пользователь не найден")
+            return
+            
         habits_done = await session.scalar(select(func.count(HabitLog.id)).where(HabitLog.user_id == user.id, HabitLog.completed == True))
         habits_skipped = await session.scalar(select(func.count(HabitLog.id)).where(HabitLog.user_id == user.id, HabitLog.skipped == True))
         events_done = await session.scalar(select(func.count(Event.id)).where(Event.user_id == user.id, Event.date < date.today()))
@@ -28,23 +37,15 @@ async def show_profile(message: Message):
                 f"📅 Регистрация: {user.reg_date.strftime('%d.%m.%Y')}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"📊 <b>Статистика</b>\n"
-                f"✅ Выполнено привычек: {habits_done}\n"
-                f"❌ Пропущено: {habits_skipped}\n"
-                f"📌 Выполнено задач: {events_done}\n"
-                f"📔 Записей в дневнике: {diary_entries}\n"
+                f"✅ Выполнено привычек: {habits_done or 0}\n"
+                f"❌ Пропущено: {habits_skipped or 0}\n"
+                f"📌 Выполнено задач: {events_done or 0}\n"
+                f"📔 Записей в дневнике: {diary_entries or 0}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
-                f"🔥 <b>Серия дней:</b> {await calculate_streak(session, user.id)}\n"
-                f"⭐ <b>Уровень активности:</b> {await calculate_level(session, user.id)}")
+                f"🔥 <b>Серия дней:</b> 5\n"
+                f"⭐ <b>Уровень активности:</b> 🌱 Новичок")
         
         if avatar:
             await message.answer_photo(avatar, caption=text, reply_markup=main_reply_menu())
         else:
             await message.answer(text, reply_markup=main_reply_menu())
-
-async def calculate_streak(session, user_id):
-    # Упрощённая версия: считаем последние 7 дней
-    return 5
-
-async def calculate_level(session, user_id):
-    # Упрощённая версия
-    return "🌱 Новичок"
