@@ -11,6 +11,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+# Используем прямой импорт, чтобы не путаться в папках
+# Файл db/database.py должен существовать!
 from db.database import init_db, DB_NAME
 
 # --- КОНФИГ ---
@@ -25,10 +27,10 @@ class TaskStates(StatesGroup):
     waiting_for_title = State()
     waiting_for_time = State()
 
-# --- МЕНЮ (Reply) ---
+# --- КЛАВИАТУРА МЕНЮ ---
 def main_menu():
     kb = [
-        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="📅 Планировщик")],
+        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="🗓 Планировщик")],
         [KeyboardButton(text="🌸 Комплимент"), KeyboardButton(text="🆘 Поддержка")],
         [KeyboardButton(text="🔄 Привычки"), KeyboardButton(text="🔒 Приватное")]
     ]
@@ -40,7 +42,7 @@ def get_rank(streak):
     if streak < 21: return "🔥 Приверженец"
     return "💎 Мастер баланса"
 
-# --- ОБРАБОТЧИКИ КОМАНД ---
+# --- ОБРАБОТЧИКИ ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -51,7 +53,6 @@ async def cmd_start(message: types.Message):
         await db.commit()
     await message.answer("✨ Добро пожаловать в систему ЛЮМИ. Твой путь к личной эффективности и гармонии начинается здесь.", reply_markup=main_menu())
 
-# --- ПРОФИЛЬ ---
 @dp.message(F.text == "👤 Профиль")
 async def show_profile(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -70,12 +71,12 @@ async def show_profile(message: types.Message):
             f"────────────────────"
         )
         
-        # Исправленные кнопки (обязательно указываем callback_data)
+        # КНОПКИ ТЕПЕРЬ С КОРРЕКТНЫМИ ДАННЫМИ
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏆 Достижения", callback_data="dev_btn"), 
-             InlineKeyboardButton(text="📊 Статистика", callback_data="dev_btn")],
-            [InlineKeyboardButton(text="📝 Редактировать", callback_data="dev_btn"), 
-             InlineKeyboardButton(text="🆘 Поддержка", callback_data="dev_btn")]
+            [InlineKeyboardButton(text="🏆 Достижения", callback_data="dev_status"), 
+             InlineKeyboardButton(text="📊 Статистика", callback_data="dev_status")],
+            [InlineKeyboardButton(text="📝 Редактировать", callback_data="dev_status"), 
+             InlineKeyboardButton(text="🆘 Поддержка", callback_data="dev_status")]
         ])
         
         try:
@@ -84,24 +85,23 @@ async def show_profile(message: types.Message):
                 await message.answer_photo(photos.photos[0][-1].file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
             else:
                 await message.answer(caption, reply_markup=kb, parse_mode="Markdown")
-        except:
+        except Exception as e:
+            logging.error(f"Photo error: {e}")
             await message.answer(caption, reply_markup=kb, parse_mode="Markdown")
 
-# Заглушка для кнопок
-@dp.callback_query(F.data == "dev_btn")
-async def process_dev_btn(callback: types.CallbackQuery):
-    await callback.answer("Эта функция скоро появится! 🛠", show_alert=True)
+@dp.callback_query(F.data == "dev_status")
+async def dev_callback(callback: types.CallbackQuery):
+    await callback.answer("Эта функция находится в разработке 🛠", show_alert=True)
 
-# --- ПЛАНИРОВЩИК ---
-@dp.message(F.text == "📅 Планировщик")
+@dp.message(F.text == "🗓 Планировщик")
 async def plan_start(message: types.Message, state: FSMContext):
-    await message.answer("📝 Введи название задачи:")
+    await message.answer("📝 Что нужно сделать? Напиши название:")
     await state.set_state(TaskStates.waiting_for_title)
 
 @dp.message(TaskStates.waiting_for_title)
-async def plan_name(message: types.Message, state: FSMContext):
+async def plan_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text)
-    await message.answer("📅 Введи время (формат: ДД.ММ ЧЧ:ММ, например 10.04 15:30):")
+    await message.answer("📅 Напиши дату и время (например: 12.04 18:00):")
     await state.set_state(TaskStates.waiting_for_time)
 
 @dp.message(TaskStates.waiting_for_time)
@@ -113,12 +113,11 @@ async def plan_time(message: types.Message, state: FSMContext):
             await db.execute("INSERT INTO tasks (user_id, title, task_time) VALUES (?, ?, ?)",
                              (message.from_user.id, data['title'], dt.strftime("%Y-%m-%d %H:%M:00")))
             await db.commit()
-        await message.answer(f"✅ Задача «{data['title']}» сохранена на {message.text}!")
+        await message.answer(f"✅ Задача «{data['title']}» создана!")
         await state.clear()
     except:
-        await message.answer("❌ Ошибка. Пиши строго как в примере: 10.04 15:00")
+        await message.answer("❌ Ошибка формата. Попробуй еще раз (ДД.ММ ЧЧ:ММ):")
 
-# --- ФОНОВАЯ ПРОВЕРКА ---
 async def check_tasks():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:00")
     async with aiosqlite.connect(DB_NAME) as db:
@@ -126,11 +125,10 @@ async def check_tasks():
             tasks = await cursor.fetchall()
             for tid, uid, title in tasks:
                 try:
-                    await bot.send_message(uid, f"🔔 **НАПОМИНАНИЕ!**\n\nПора сделать: {title}")
+                    await bot.send_message(uid, f"🔔 **НАПОМИНАНИЕ:**\n\nПора сделать: {title}")
                     await db.execute("UPDATE tasks SET is_notified = 1 WHERE task_id = ?", (tid,))
                     await db.commit()
-                except:
-                    pass
+                except: pass
 
 async def main():
     await init_db()
