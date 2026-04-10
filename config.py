@@ -1,5 +1,12 @@
-# Токен бота (вставлен напрямую)
-BOT_TOKEN: str = "8690428738:AAGUuo-V3id99Z-3UsT6twy2bJGmScCXFbA"
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
-# Список ID администраторов
-ADMINS: list[int] = [8666952157]
+load_dotenv()
+
+BASE_DIR = Path(__file__).parent
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+DB_URL = os.getenv("DB_URL", f"sqlite+aiosqlite:///{BASE_DIR}/data/lumi.db")
+TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
