@@ -30,8 +30,9 @@ class TaskStates(StatesGroup):
 # --- ГЛАВНАЯ КЛАВИАТУРА ---
 def main_menu():
     kb = [
-        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="📅 Планировщик")],
-        [KeyboardButton(text="🌸 Комплимент"), KeyboardButton(text="🆘 Поддержка")]
+        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="🗓 Планировщик")],
+        [KeyboardButton(text="🌸 Комплимент"), KeyboardButton(text="🆘 Поддержка")],
+        [KeyboardButton(text="🔄 Привычки"), KeyboardButton(text="🔒 Приватное")]
     ]
     return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
@@ -42,7 +43,7 @@ def get_rank(streak):
     if streak < 50: return "💎 Мастер баланса"
     return "👑 Легенда ЛЮМИ"
 
-# --- ОБРАБОТЧИКИ КОМАНД ---
+# --- ОБРАБОТЧИКИ ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     async with aiosqlite.connect(DB_NAME) as db:
@@ -51,9 +52,8 @@ async def cmd_start(message: types.Message):
             (message.from_user.id, message.from_user.username, message.from_user.first_name)
         )
         await db.commit()
-    await message.answer("✨ Добро пожаловать в ЛЮМИ.", reply_markup=main_menu())
+    await message.answer("✨ Добро пожаловать в ЛЮМИ. Твой путь к гармонии начинается здесь.", reply_markup=main_menu())
 
-# --- БЛОК ПРОФИЛЯ ---
 @dp.message(F.text == "👤 Профиль")
 async def show_profile(message: types.Message):
     user_id = message.from_user.id
@@ -67,16 +67,16 @@ async def show_profile(message: types.Message):
         caption = (
             f"👤 **ПРОФИЛЬ: {name}**\n"
             f"────────────────────\n"
-            f"🎖 **Ранг:** {rank}\n"
-            f"🔥 **Серия:** {streak} дн.\n"
-            f"📅 **С нами с:** {joined[:10]}\n"
-            f"────────────────────"
+            f"🎖 Ранг: {rank}\n"
+            f"🔥 Серия: {streak} дн.\n"
+            f"📅 С нами с: {joined[:10]}\n"
+            f"────────────────────\n"
+            f"Выбери раздел ниже:"
         )
         
-        # Инлайновые кнопки под карточкой
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏆 Достижения", callback_data="ach"), InlineKeyboardButton(text="📊 Стат")],
-            [InlineKeyboardButton(text="🆘 Поддержка", callback_data="support")]
+            [InlineKeyboardButton(text="🏆 Достижения", callback_data="ach"), InlineKeyboardButton(text="📊 Статистика", callback_data="stat")],
+            [InlineKeyboardButton(text="📝 Редактировать", callback_data="edit"), InlineKeyboardButton(text="🆘 Поддержка", callback_data="support")]
         ])
 
         try:
@@ -88,52 +88,52 @@ async def show_profile(message: types.Message):
         except:
             await message.answer(caption, reply_markup=kb, parse_mode="Markdown")
 
-# --- БЛОК ПЛАНИРОВЩИКА ---
-@dp.message(F.text == "📅 Планировщик")
+@dp.message(F.text == "🗓 Планировщик")
 async def start_task(message: types.Message, state: FSMContext):
-    await message.answer("📝 Что нужно сделать? Напиши название:")
+    await message.answer("📝 Что нужно сделать? Напиши название задачи:")
     await state.set_state(TaskStates.waiting_for_title)
 
 @dp.message(TaskStates.waiting_for_title)
 async def task_name(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text)
-    await message.answer("📅 Напиши дату и время (например: 12.04 18:00):")
+    await message.answer("📅 Теперь введи дату и время (например, 10.04 14:05):")
     await state.set_state(TaskStates.waiting_for_time)
 
 @dp.message(TaskStates.waiting_for_time)
 async def task_time(message: types.Message, state: FSMContext):
     try:
+        # Парсим время
         dt = datetime.strptime(f"{message.text}.{datetime.now().year}", "%d.%m %H:%M.%Y")
-        if dt < datetime.now():
-            await message.answer("❌ Время уже прошло!")
-            return
-        
         data = await state.get_data()
+        
         async with aiosqlite.connect(DB_NAME) as db:
             await db.execute("INSERT INTO tasks (user_id, title, task_time) VALUES (?, ?, ?)",
-                             (message.from_user.id, data['title'], dt))
+                             (message.from_user.id, data['title'], dt.strftime("%Y-%m-%d %H:%M:00")))
             await db.commit()
         
-        await message.answer(f"✅ Задача «{data['title']}» создана!", reply_markup=main_menu())
+        await message.answer(f"✅ Задача «{data['title']}» создана на {dt.strftime('%d.%m %H:%M')}!")
         await state.clear()
-    except:
-        await message.answer("❌ Формат: ДД.ММ ЧЧ:ММ")
+    except Exception as e:
+        logging.error(e)
+        await message.answer("❌ Ошибка в формате. Напиши еще раз (ДД.ММ ЧЧ:ММ):")
 
-# --- ПЛАНИРОВЩИК (РАССЫЛКА) ---
+# --- ФОНОВАЯ ПРОВЕРКА ЗАДАЧ ---
 async def check_tasks():
-    now = datetime.now().replace(second=0, microsecond=0)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:00")
     async with aiosqlite.connect(DB_NAME) as db:
-        async with db.execute("SELECT task_id, user_id, title FROM tasks WHERE task_time <= ?", (now,)) as cursor:
+        async with db.execute("SELECT task_id, user_id, title FROM tasks WHERE task_time <= ? AND is_notified = 0", (now,)) as cursor:
             tasks = await cursor.fetchall()
             for tid, uid, title in tasks:
                 try:
-                    await bot.send_message(uid, f"🔔 НАПОМИНАНИЕ: {title}")
+                    await bot.send_message(uid, f"🔔 **НАПОМИНАНИЕ:**\n\nНужно: {title}")
                     await db.execute("DELETE FROM tasks WHERE task_id = ?", (tid,))
-                except: pass
-        await db.commit()
+                    await db.commit()
+                except:
+                    pass
 
 async def main():
     await init_db()
+    # Запускаем проверку каждую минуту
     scheduler.add_job(check_tasks, "interval", minutes=1)
     scheduler.start()
     await dp.start_polling(bot)
