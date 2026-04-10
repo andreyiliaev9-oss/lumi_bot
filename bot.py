@@ -1,22 +1,39 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 import aiosqlite
 
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 from db.database import init_db, DB_NAME
 
-# Конфиг
+# --- КОНФИГ ---
 API_TOKEN = '8690428738:AAGUuo-V3id99Z-3UsT6twy2bJGmScCXFbA'
-ADMIN_ID = 5695627606 # Твой ID для получения сообщений поддержки
+ADMIN_ID = 5695627606
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
+
+# --- СОСТОЯНИЯ (FSM) ---
+class TaskStates(StatesGroup):
+    waiting_for_title = State()
+    waiting_for_time = State()
+
+# --- ГЛАВНАЯ КЛАВИАТУРА ---
+def main_menu():
+    kb = [
+        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="📅 Планировщик")],
+        [KeyboardButton(text="🌸 Комплимент"), KeyboardButton(text="🆘 Поддержка")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
 # --- ЛОГИКА РАНГОВ ---
 def get_rank(streak):
@@ -24,16 +41,6 @@ def get_rank(streak):
     if streak < 21: return "🔥 Приверженец"
     if streak < 50: return "💎 Мастер баланса"
     return "👑 Легенда ЛЮМИ"
-
-# --- КЛАВИАТУРЫ ---
-def get_profile_kb():
-    buttons = [
-        [InlineKeyboardButton(text="🏆 Достижения", callback_data="achievements"),
-         InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
-        [InlineKeyboardButton(text="📝 Редактировать", callback_data="edit_profile"),
-         InlineKeyboardButton(text="🆘 Поддержка", callback_data="support")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 # --- ОБРАБОТЧИКИ КОМАНД ---
 @dp.message(Command("start"))
@@ -44,9 +51,10 @@ async def cmd_start(message: types.Message):
             (message.from_user.id, message.from_user.username, message.from_user.first_name)
         )
         await db.commit()
-    await message.answer("✨ Добро пожаловать в ЛЮМИ.\nТвой персональный путь к гармонии начался. Используй /profile для просмотра своей карточки.")
+    await message.answer("✨ Добро пожаловать в ЛЮМИ.", reply_markup=main_menu())
 
-@dp.message(Command("profile"))
+# --- БЛОК ПРОФИЛЯ ---
+@dp.message(F.text == "👤 Профиль")
 async def show_profile(message: types.Message):
     user_id = message.from_user.id
     async with aiosqlite.connect(DB_NAME) as db:
@@ -56,55 +64,77 @@ async def show_profile(message: types.Message):
     if user_data:
         name, streak, joined = user_data
         rank = get_rank(streak)
-        
         caption = (
             f"👤 **ПРОФИЛЬ: {name}**\n"
             f"────────────────────\n"
             f"🎖 **Ранг:** {rank}\n"
             f"🔥 **Серия:** {streak} дн.\n"
             f"📅 **С нами с:** {joined[:10]}\n"
-            f"────────────────────\n"
-            f"Выбери раздел ниже:"
+            f"────────────────────"
         )
+        
+        # Инлайновые кнопки под карточкой
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏆 Достижения", callback_data="ach"), InlineKeyboardButton(text="📊 Стат")],
+            [InlineKeyboardButton(text="🆘 Поддержка", callback_data="support")]
+        ])
 
         try:
             photos = await bot.get_user_profile_photos(user_id, limit=1)
             if photos.total_count > 0:
-                await message.answer_photo(photos.photos[0][-1].file_id, caption=caption, reply_markup=get_profile_kb(), parse_mode="Markdown")
+                await message.answer_photo(photos.photos[0][-1].file_id, caption=caption, reply_markup=kb, parse_mode="Markdown")
             else:
-                await message.answer(caption, reply_markup=get_profile_kb(), parse_mode="Markdown")
+                await message.answer(caption, reply_markup=kb, parse_mode="Markdown")
         except:
-            await message.answer(caption, reply_markup=get_profile_kb(), parse_mode="Markdown")
+            await message.answer(caption, reply_markup=kb, parse_mode="Markdown")
 
-# --- ОБРАБОТКА КНОПОК ---
-@dp.callback_query(F.data == "support")
-async def support_handler(callback: types.CallbackQuery):
-    await callback.message.answer("Опиши свою проблему или введи секретный код доступа:")
-    await callback.answer()
+# --- БЛОК ПЛАНИРОВЩИКА ---
+@dp.message(F.text == "📅 Планировщик")
+async def start_task(message: types.Message, state: FSMContext):
+    await message.answer("📝 Что нужно сделать? Напиши название:")
+    await state.set_state(TaskStates.waiting_for_title)
 
-@dp.callback_query(F.data.in_(["achievements", "stats", "edit_profile"]))
-async def placeholder_handler(callback: types.CallbackQuery):
-    await callback.answer("Этот раздел в разработке 🛠", show_alert=True)
+@dp.message(TaskStates.waiting_for_title)
+async def task_name(message: types.Message, state: FSMContext):
+    await state.update_data(title=message.text)
+    await message.answer("📅 Напиши дату и время (например: 12.04 18:00):")
+    await state.set_state(TaskStates.waiting_for_time)
+
+@dp.message(TaskStates.waiting_for_time)
+async def task_time(message: types.Message, state: FSMContext):
+    try:
+        dt = datetime.strptime(f"{message.text}.{datetime.now().year}", "%d.%m %H:%M.%Y")
+        if dt < datetime.now():
+            await message.answer("❌ Время уже прошло!")
+            return
+        
+        data = await state.get_data()
+        async with aiosqlite.connect(DB_NAME) as db:
+            await db.execute("INSERT INTO tasks (user_id, title, task_time) VALUES (?, ?, ?)",
+                             (message.from_user.id, data['title'], dt))
+            await db.commit()
+        
+        await message.answer(f"✅ Задача «{data['title']}» создана!", reply_markup=main_menu())
+        await state.clear()
+    except:
+        await message.answer("❌ Формат: ДД.ММ ЧЧ:ММ")
 
 # --- ПЛАНИРОВЩИК (РАССЫЛКА) ---
-async def send_scheduled_messages(mode):
+async def check_tasks():
+    now = datetime.now().replace(second=0, microsecond=0)
     async with aiosqlite.connect(DB_NAME) as db:
-        column_enabled = "morning_enabled" if mode == "morning" else "evening_enabled"
-        column_time = "morning_time" if mode == "morning" else "evening_time"
-        column_msg = "morning_msg" if mode == "morning" else "evening_msg"
-        current_time = datetime.now().strftime("%H:%M")
-        
-        async with db.execute(f"SELECT user_id, {column_msg} FROM users WHERE {column_enabled} = 1 AND {column_time} = ?", (current_time,)) as cursor:
-            users = await cursor.fetchall()
-            for user_id, msg in users:
+        async with db.execute("SELECT task_id, user_id, title FROM tasks WHERE task_time <= ?", (now,)) as cursor:
+            tasks = await cursor.fetchall()
+            for tid, uid, title in tasks:
                 try:
-                    await bot.send_message(user_id, msg)
+                    await bot.send_message(uid, f"🔔 НАПОМИНАНИЕ: {title}")
+                    await db.execute("DELETE FROM tasks WHERE task_id = ?", (tid,))
                 except: pass
+        await db.commit()
 
 async def main():
     await init_db()
-    scheduler.add_job(send_scheduled_messages, "interval", minutes=1, args=["morning"])
-    scheduler.add_job(send_scheduled_messages, "interval", minutes=1, args=["evening"])
+    scheduler.add_job(check_tasks, "interval", minutes=1)
     scheduler.start()
     await dp.start_polling(bot)
 
