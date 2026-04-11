@@ -1,6 +1,6 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- АДМИН ПАНЕЛЬ ---
+# --- ГЛАВНАЯ АДМИН-ПАНЕЛЬ ---
 def admin_main_kb():
     buttons = [
         [InlineKeyboardButton(text="❤️ Комплименты", callback_data="admin_compliments")],
@@ -12,44 +12,33 @@ def admin_main_kb():
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+# Подменю комплиментов
 def admin_compliments_kb():
     buttons = [
         [InlineKeyboardButton(text="➕ Добавить", callback_data="add_compliment")],
-        [InlineKeyboardButton(text="🗑 Удалить все (сброс)", callback_data="clear_compliments")],
+        [InlineKeyboardButton(text="🗑 Удалить все", callback_data="clear_compliments")],
         [InlineKeyboardButton(text="« Назад", callback_data="admin_main")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# --- ПРИВАТНАЯ ЗОНА (СЕЙФ) ---
+# --- ПРИВАТНАЯ ЗОНА: КЛАВИАТУРА PIN ---
 def pin_keyboard(current_pin: str = ""):
-    # Отображаем звездочки вместо цифр сверху кнопок
     display = "● " * len(current_pin) if current_pin else "Введите PIN"
+    builder = [[InlineKeyboardButton(text=display, callback_data="none")]]
     
-    builder = [
-        [InlineKeyboardButton(text=display, callback_data="none")],
-        [
-            InlineKeyboardButton(text="1", callback_data="pin_1"),
-            InlineKeyboardButton(text="2", callback_data="pin_2"),
-            InlineKeyboardButton(text="3", callback_data="pin_3")
-        ],
-        [
-            InlineKeyboardButton(text="4", callback_data="pin_4"),
-            InlineKeyboardButton(text="5", callback_data="pin_5"),
-            InlineKeyboardButton(text="6", callback_data="pin_6")
-        ],
-        [
-            InlineKeyboardButton(text="7", callback_data="pin_7"),
-            InlineKeyboardButton(text="8", callback_data="pin_8"),
-            InlineKeyboardButton(text="9", callback_data="pin_9")
-        ],
-        [
-            InlineKeyboardButton(text="❌", callback_data="pin_clear"),
-            InlineKeyboardButton(text="0", callback_data="pin_0"),
-            InlineKeyboardButton(text="⬅️", callback_data="pin_backspace")
-        ]
-    ]
+    # Кнопки цифр
+    rows = [["1","2","3"], ["4","5","6"], ["7","8","9"]]
+    for row in rows:
+        builder.append([InlineKeyboardButton(text=c, callback_data=f"pin_{c}") for c in row])
+    
+    builder.append([
+        InlineKeyboardButton(text="❌", callback_data="pin_clear"),
+        InlineKeyboardButton(text="0", callback_data="pin_0"),
+        InlineKeyboardButton(text="⬅️", callback_data="pin_backspace")
+    ])
     return InlineKeyboardMarkup(inline_keyboard=builder)
 
+# Главное меню приватки
 def private_main_menu_kb():
     buttons = [
         [InlineKeyboardButton(text="📅 Планировщик", callback_data="p_planner")],
@@ -58,5 +47,15 @@ def private_main_menu_kb():
         [InlineKeyboardButton(text="📝 Приватные заметки", callback_data="p_notes")],
         [InlineKeyboardButton(text="⏳ Капсула времени", callback_data="p_capsule")],
         [InlineKeyboardButton(text="🚪 Выйти в меню", callback_data="p_exit")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# Меню цикла
+def cycle_main_kb():
+    buttons = [
+        [InlineKeyboardButton(text="📝 Отметить состояние", callback_data="cycle_log")],
+        [InlineKeyboardButton(text="⚙️ Настроить цикл", callback_data="cycle_setup")],
+        [InlineKeyboardButton(text="📊 Статистика (CSV)", callback_data="cycle_export")],
+        [InlineKeyboardButton(text="« Назад", callback_data="p_main")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
