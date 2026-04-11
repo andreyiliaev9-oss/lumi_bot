@@ -1,37 +1,11 @@
-import aiosqlite
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from .models import Base
 
-DB_NAME = "lumi_database.db"
+DATABASE_URL = "sqlite+aiosqlite:///db.sqlite3"
+
+engine = create_async_engine(DATABASE_URL, echo=False)
+async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 async def init_db():
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                gender TEXT,
-                streak_days INTEGER DEFAULT 0,
-                joined_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-                is_registered INTEGER DEFAULT 0
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS tasks (
-                task_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                title TEXT,
-                task_time DATETIME,
-                is_notified INTEGER DEFAULT 0
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS habits (
-                habit_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                title TEXT,
-                remind_time TEXT,
-                streak INTEGER DEFAULT 0,
-                last_completed DATE DEFAULT '2000-01-01'
-            )
-        """)
-        await db.commit()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
