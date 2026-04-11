@@ -17,11 +17,17 @@ class User(Base):
     evening_enabled = Column(Boolean, default=True)
     morning_text = Column(String, default="Доброе утро! ☀️")
     evening_text = Column(String, default="Спокойной ночи! 🌙")
-    cycle_start_date = Column(Date, nullable=True)
-    cycle_length = Column(Integer, nullable=True)
-    period_length = Column(Integer, nullable=True)
     pin_hash = Column(String, nullable=True)
-    last_pms_notification = Column(Date, nullable=True)  # для предотвращения дублирования
+    # Для приватной зоны: храним хеш PIN-кода
+    private_pin_hash = Column(String, nullable=True)
+    private_session_expires = Column(DateTime, nullable=True)
+
+class Compliment(Base):
+    __tablename__ = 'compliments'
+    id = Column(Integer, primary_key=True)
+    text = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
 
 class Habit(Base):
     __tablename__ = 'habits'
@@ -30,7 +36,7 @@ class Habit(Base):
     name = Column(String)
     description = Column(Text)
     time = Column(String)
-    frequency = Column(String)
+    frequency = Column(String)  # 'everyday', '1,3,5', '2,4', '6,7', 'custom_days', 'month_days:1,15'
     created_at = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
 
@@ -59,19 +65,19 @@ class CycleLog(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'))
     date = Column(Date, default=datetime.now().date)
-    mood = Column(Integer, nullable=True)      # 1-5
-    pain = Column(Integer, nullable=True)      # 1-5
-    energy = Column(Integer, nullable=True)    # 1-5
-    sleep = Column(Integer, nullable=True)     # 1-5
-    headache = Column(Boolean, default=False)  # головная боль
-    bloating = Column(Boolean, default=False)  # вздутие
-    acne = Column(Boolean, default=False)      # акне
+    mood = Column(Integer, nullable=True)
+    pain = Column(Integer, nullable=True)
+    energy = Column(Integer, nullable=True)
+    sleep = Column(Integer, nullable=True)
+    headache = Column(Boolean, default=False)
+    bloating = Column(Boolean, default=False)
+    acne = Column(Boolean, default=False)
     notes = Column(Text, nullable=True)
 
 class CycleTip(Base):
     __tablename__ = 'cycle_tips'
     id = Column(Integer, primary_key=True)
-    phase = Column(String)  # 'menstruation', 'follicular', 'ovulation', 'luteal'
+    phase = Column(String)  # menstruation, follicular, ovulation, luteal
     tip = Column(Text)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now)
@@ -94,3 +100,13 @@ class SecretNote(Base):
     content = Column(Text)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+class TimeCapsule(Base):
+    __tablename__ = 'time_capsules'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'))
+    title = Column(String)
+    content = Column(Text)
+    open_date = Column(Date)  # когда открыть
+    created_at = Column(DateTime, default=datetime.now)
+    is_opened = Column(Boolean, default=False)
