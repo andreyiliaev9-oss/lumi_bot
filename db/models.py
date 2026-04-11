@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, BigInteger, Text, ForeignKey
+from sqlalchemy.orm import relationship
 from datetime import datetime
 from .db import Base
 
@@ -9,32 +10,29 @@ class User(Base):
     name = Column(String)
     reg_date = Column(DateTime, default=datetime.now)
     
-    # Настройки
-    morning_time = Column(String, default="08:00")
+    # Настройки времени (ТЗ 2.8)
+    morning_time = Column(String, default="19:00")
     evening_time = Column(String, default="23:00")
     
     # Безопасность
-    private_pin_hash = Column(String, nullable=True) # Здесь будет зашифрованный PIN
+    private_pin_hash = Column(String, nullable=True)
     
-    # Цикл
+    # Данные цикла (ТЗ 2.2.2)
     cycle_start_date = Column(Date, nullable=True)
     cycle_length = Column(Integer, default=28)
     period_length = Column(Integer, default=5)
     
-    # Статистика
+    # Статистика для профиля (ТЗ 2.3)
     completed_habits = Column(Integer, default=0)
     missed_habits = Column(Integer, default=0)
     completed_tasks = Column(Integer, default=0)
     diary_count = Column(Integer, default=0)
 
-class DiaryEntry(Base):
-    __tablename__ = 'diary'
+class CycleTip(Base):
+    __tablename__ = 'cycle_tips'
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
+    phase = Column(String) # menstruation, follicular, ovulation, luteal
     text = Column(Text)
-    emotion = Column(String, nullable=True)
-    date = Column(Date, default=datetime.now().date)
-    tags = Column(String, nullable=True)
 
 class CycleLog(Base):
     __tablename__ = 'cycle_logs'
@@ -45,9 +43,18 @@ class CycleLog(Base):
     pain = Column(Integer)
     energy = Column(Integer)
     sleep = Column(Integer)
+    symptoms = Column(String, nullable=True)
     notes = Column(Text, nullable=True)
 
-# Также добавим таблицу для комплиментов
+class DiaryEntry(Base):
+    __tablename__ = 'diary'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'))
+    text = Column(Text)
+    emotion = Column(String, nullable=True)
+    date = Column(Date, default=datetime.now().date)
+    tags = Column(String, nullable=True)
+
 class Compliment(Base):
     __tablename__ = 'compliments'
     id = Column(Integer, primary_key=True)
