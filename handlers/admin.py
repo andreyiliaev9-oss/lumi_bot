@@ -1,6 +1,5 @@
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
@@ -12,85 +11,71 @@ from sqlalchemy import select, func, update
 
 router = Router()
 
-# Состояния для ввода данных (FSM)
 class AdminStates(StatesGroup):
     waiting_for_compliment = State()
     waiting_for_broadcast = State()
-    waiting_for_cycle_tip = State()
-    waiting_for_morning_text = State()
+    waiting_for_morning_time = State()
+    waiting_for_evening_time = State()
 
-# --- ОСНОВНОЕ МЕНЮ ---
 @router.message(F.text == "⚙️ Админ-панель")
 async def admin_panel(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    await message.answer(
-        "👑 <b>ПАНЕЛЬ УПРАВЛЕНИЯ ЛЮМИ</b>\n\n"
-        "Здесь ты можешь управлять контентом, смотреть статистику и делать рассылки.",
-        reply_markup=admin_main_kb(), 
-        parse_mode="HTML"
-    )
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer("👑 <b>ПАНЕЛЬ УПРАВЛЕНИЯ ЛЮМИ</b>", reply_markup=admin_main_kb(), parse_mode="HTML")
 
-# --- БЛОК СТАТИСТИКИ (Раздел 2.7 ТЗ) ---
+@router.callback_query(F.data == "admin_main")
+async def back_to_admin_main(callback: CallbackQuery):
+    await callback.message.edit_text("👑 <b>ПАНЕЛЬ УПРАВЛЕНИЯ ЛЮМИ</b>", reply_markup=admin_main_kb(), parse_mode="HTML")
+
+# --- СТАТИСТИКА ---
 @router.callback_query(F.data == "admin_stats")
 async def admin_stats(callback: CallbackQuery):
     async with async_session() as session:
-        users_count = await session.scalar(select(func.count(User.id)))
-        diary_count = await session.scalar(select(func.count(DiaryEntry.id)))
-        comp_count = await session.scalar(select(func.count(Compliment.id)))
-        
-    text = (
-        "📊 <b>ТЕКУЩАЯ СТАТИСТИКА</b>\n"
-        "━━━━━━━━━━━━━━━\n"
-        f"👥 Всего девушек в базе: <b>{users_count}</b>\n"
-        f"📝 Записей в дневниках: <b>{diary_count}</b>\n"
-        f"❤️ База комплиментов: <b>{comp_count}</b>\n"
-        "━━━━━━━━━━━━━━━"
-    )
-    await callback.message.edit_text(text, reply_markup=admin_main_kb(), parse_mode="HTML")
+        u_count = await session.scalar(select(func.count(User.id)))
+        d_count = await session.scalar(select(func.count(DiaryEntry.id)))
+    await callback.message.edit_text(f"📊 <b>СТАТИСТИКА</b>\n\nЮзеров: {u_count}\nЗаписей: {d_count}", 
+                                     reply_markup=admin_main_kb(), parse_mode="HTML")
 
-# --- УПРАВЛЕНИЕ КОМПЛИМЕНТАМИ (Раздел 2.4 ТЗ) ---
+# --- ВРЕМЯ (ТЗ 2.8) ---
+@router.callback_query(F.data == "admin_time_settings")
+async def time_settings(callback: CallbackQuery):
+    async with async_session() as session:
+        user = await session.scalar(select(User).where(User.tg_id == ADMIN_ID))
+    
+    text = f"⏰ <b>ВРЕМЯ</b>\n☀️ Утро: {user.morning_time if user else '19:00'}\n🌙 Вечер: {user.evening_time if user else '23:00'}"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Утро ☀️", callback_data="set_morning_t")],
+        [InlineKeyboardButton(text="Вечер 🌙", callback_data="set_evening_t")],
+        [InlineKeyboardButton(text="« Назад", callback_data="admin_main")]
+    ])
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data == "set_morning_t")
+async def set_morning(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введи время (ЧЧ:ММ):")
+    await state.set_state(AdminStates.waiting_for_morning_time)
+
+@router.message(AdminStates.waiting_for_morning_time)
+async def save_morning(message: Message, state: FSMContext):
+    async with async_session() as session:
+        await session.execute(update(User).values(morning_time=message.text))
+        await session.commit()
+    await message.answer(f"✅ Утро теперь в {message.text}", reply_markup=admin_main_kb())
+    await state.clear()
+
+# --- КОМПЛИМЕНТЫ ---
 @router.callback_query(F.data == "admin_compliments")
-async def manage_compliments(callback: CallbackQuery):
-    await callback.message.edit_text(
-        "❤️ <b>УПРАВЛЕНИЕ КОМПЛИМЕНТАМИ</b>\n\n"
-        "Выбери действие:",
-        reply_markup=admin_compliments_kb(),
-        parse_mode="HTML"
-    )
+async def admin_comp(callback: CallbackQuery):
+    await callback.message.edit_text("❤️ <b>КОМПЛИМЕНТЫ</b>", reply_markup=admin_compliments_kb(), parse_mode="HTML")
 
 @router.callback_query(F.data == "add_compliment")
-async def start_add_comp(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("Напиши текст нового комплимента:")
+async def add_comp_start(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Напиши текст:")
     await state.set_state(AdminStates.waiting_for_compliment)
 
 @router.message(AdminStates.waiting_for_compliment)
-async def save_compliment(message: Message, state: FSMContext):
+async def add_comp_save(message: Message, state: FSMContext):
     async with async_session() as session:
-        new_comp = Compliment(text=message.text, is_active=True)
-        session.add(new_comp)
+        session.add(Compliment(text=message.text))
         await session.commit()
-    await message.answer(f"✅ Добавлено: {message.text}", reply_markup=admin_main_kb())
-    await state.clear()
-
-# --- РАССЫЛКА (Раздел 2.7 ТЗ) ---
-@router.callback_query(F.data == "admin_broadcast")
-async def start_broadcast(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите текст сообщения для <b>ВСЕХ</b> пользователей:", parse_mode="HTML")
-    await state.set_state(AdminStates.waiting_for_broadcast)
-
-@router.message(AdminStates.waiting_for_broadcast)
-async def run_broadcast(message: Message, state: FSMContext, bot):
-    async with async_session() as session:
-        users = await session.scalars(select(User.tg_id))
-        
-    count = 0
-    for user_id in users:
-        try:
-            await bot.send_message(user_id, message.text)
-            count += 1
-        except Exception:
-            continue
-            
-    await message.answer(f"📢 Рассылка завершена!\nПолучили: {count} пользователей.")
+    await message.answer("✅ Добавлено", reply_markup=admin_main_kb())
     await state.clear()
