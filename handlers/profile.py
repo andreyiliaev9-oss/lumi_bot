@@ -12,6 +12,7 @@ router = Router()
 async def show_profile(message: Message):
     tg_id = message.from_user.id
 
+    # Фото профиля
     avatar = None
     try:
         photos = await message.bot.get_user_profile_photos(tg_id, limit=1)
@@ -26,11 +27,13 @@ async def show_profile(message: Message):
             await message.answer("Ошибка: пользователь не найден")
             return
 
+        # Статистика
         habits_done = await session.scalar(select(func.count(HabitLog.id)).where(HabitLog.user_id == user.id, HabitLog.completed == True))
         habits_skipped = await session.scalar(select(func.count(HabitLog.id)).where(HabitLog.user_id == user.id, HabitLog.skipped == True))
         events_done = await session.scalar(select(func.count(Event.id)).where(Event.user_id == user.id, Event.date < date.today()))
         diary_entries = await session.scalar(select(func.count(DiaryEntry.id)).where(DiaryEntry.user_id == user.id))
 
+        # Серия (активность: выполненная привычка или запись цикла)
         streak = 0
         current = date.today()
         while True:
@@ -54,10 +57,10 @@ async def show_profile(message: Message):
             f"📔 Записей в дневнике: {diary_entries or 0}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"🔥 Серия дней: {streak}\n"
-            f"⭐ Уровень активности: 🌱 Новичок"
+            f"⭐ Уровень активности: {'🌱 Новичок' if streak < 7 else '🌿 Продвинутый' if streak < 30 else '💜 Эксперт'}"
         )
 
         if avatar:
-            await message.answer_photo(avatar, caption=text, reply_markup=main_reply_menu())
+            await message.answer_photo(avatar, caption=text, reply_markup=main_reply_menu(tg_id == 8666952157))
         else:
-            await message.answer(text, reply_markup=main_reply_menu())
+            await message.answer(text, reply_markup=main_reply_menu(tg_id == 8666952157))
