@@ -1,16 +1,17 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-def main_reply_menu(is_admin: bool = False):
+def main_kb(user_id: int, admin_id: int):
     buttons = [
-        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="⚙️ Настройки")],
-        [KeyboardButton(text="💝 Комплименты"), KeyboardButton(text="🔒 Приватное")],
+        [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="✨ Комплименты")],
+        [KeyboardButton(text="🔐 Приватное"), KeyboardButton(text="🆘 Поддержка")]
     ]
-    if is_admin:
-        buttons.append([KeyboardButton(text="👑 Админ-панель")])
-    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-def cancel_reply():
+    
+    # Если это ты, добавляем кнопку админки
+    if user_id == admin_id:
+        buttons.append([KeyboardButton(text="⚙️ Админ-панель")])
+        
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="❌ Отмена")]],
-        resize_keyboard=True
+        keyboard=buttons,
+        resize_keyboard=True,
+        input_field_placeholder="Выбери раздел..."
     )
