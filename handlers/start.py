@@ -19,17 +19,23 @@ async def cmd_start(message: Message):
             user = User(tg_id=tg_id, name=message.from_user.full_name)
             session.add(user)
             await session.commit()
-            await message.answer(
-                f"Привет, {user.name}! Я ЛЮМИ – твой личный помощник.",
-                reply_markup=main_reply_menu()
-            )
-        else:
-            await message.answer(
-                f"С возвращением, {user.name}!",
-                reply_markup=main_reply_menu()
-            )
+        is_admin = (tg_id == 8666952157)  # твой ID
+        await message.answer(
+            f"💜 Привет, {user.name}! Я ЛЮМИ — твой личный помощник.",
+            reply_markup=main_reply_menu(is_admin=is_admin)
+        )
 
 @router.callback_query(F.data == "start")
 async def back_to_menu(callback: CallbackQuery):
-    await callback.message.edit_text("Главное меню:", reply_markup=back_button("start"))
+    tg_id = callback.from_user.id
+    is_admin = (tg_id == 8666952157)
+    await callback.message.edit_text(
+        "💜 Главное меню:",
+        reply_markup=back_button("start")
+    )
+    # Отправляем новое сообщение с reply-меню, так как edit_text не меняет reply-кнопки
+    await callback.message.answer(
+        "Выберите действие:",
+        reply_markup=main_reply_menu(is_admin=is_admin)
+    )
     await callback.answer()
