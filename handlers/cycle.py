@@ -6,7 +6,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from sqlalchemy import select, func
+from sqlalchemy import select
 from db.db import async_session
 from db.models import User, CycleLog, CycleTip
 from keyboards.inline import back_button
@@ -68,16 +68,6 @@ async def cycle_menu(callback: CallbackQuery):
 
         next_period = user.cycle_start_date + timedelta(days=user.cycle_length)
         days_left = (next_period - today).days
-
-        # ПМС-уведомление (если есть поле last_pms_notification, иначе пропускаем)
-        if hasattr(user, 'last_pms_notification'):
-            if 0 < days_left <= 5:
-                if not user.last_pms_notification or user.last_pms_notification < today:
-                    await callback.message.answer(
-                        f"🌙 Внимание! Через {days_left} дн. ожидаются месячные.\nБудьте внимательны к себе."
-                    )
-                    user.last_pms_notification = today
-                    await session.commit()
 
         text = (
             f"{phase_emoji} <b>День цикла: {cycle_day}</b>\n"
