@@ -1,17 +1,23 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import DeclarativeBase
 from config import DB_URL
+from .models import Base
 
-# Создаем "движок" для общения с файлом lumi.db
-engine = create_async_engine(DB_URL, echo=False)
-
-# Создаем фабрику сессий (чтобы открывать/закрывать базу)
-async_session = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False
+# Создаем движок с поддержкой асинхронности
+engine = create_async_engine(
+    DB_URL,
+    echo=False, # Поставь True, если захочешь видеть все SQL-запросы в консоли
+    future=True
 )
 
-# Базовый класс для всех таблиц
-class Base(DeclarativeBase):
-    pass
+# Фабрика сессий для работы с запросами
+async_session = async_sessionmaker(
+    engine, 
+    expire_on_commit=False, 
+    class_=AsyncSession
+)
+
+# Функция для инициализации базы при старте
+async def init_db():
+    async with engine.begin() as conn:
+        # Эта команда создает все таблицы из файла models.py, если их еще нет
+        await conn.run_sync(Base.metadata.create_all)
