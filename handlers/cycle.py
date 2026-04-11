@@ -9,7 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, func
 from db.db import async_session
 from db.models import User, CycleLog, CycleTip
-from keyboards.inline import back_button, cycle_phases_keyboard
+from keyboards.inline import back_button
 
 router = Router()
 
@@ -69,15 +69,15 @@ async def cycle_menu(callback: CallbackQuery):
         next_period = user.cycle_start_date + timedelta(days=user.cycle_length)
         days_left = (next_period - today).days
 
-        # ПМС-уведомление (за 5 дней)
-        if 0 < days_left <= 5:
-            if not user.last_pms_notification or user.last_pms_notification < today:
-                await callback.message.answer(
-                    f"🌙 Внимание! Через {days_left} дн. ожидаются месячные.\n"
-                    "Будьте внимательны к себе."
-                )
-                user.last_pms_notification = today
-                await session.commit()
+        # ПМС-уведомление (если есть поле last_pms_notification, иначе пропускаем)
+        if hasattr(user, 'last_pms_notification'):
+            if 0 < days_left <= 5:
+                if not user.last_pms_notification or user.last_pms_notification < today:
+                    await callback.message.answer(
+                        f"🌙 Внимание! Через {days_left} дн. ожидаются месячные.\nБудьте внимательны к себе."
+                    )
+                    user.last_pms_notification = today
+                    await session.commit()
 
         text = (
             f"{phase_emoji} <b>День цикла: {cycle_day}</b>\n"
@@ -154,7 +154,6 @@ async def get_period_length(message: Message, state: FSMContext):
     except:
         await message.answer("Введите число.")
 
-# Вспомогательная функция для имитации callback (чтобы вернуться в меню)
 async def create_callback(message: Message):
     class FakeCallback:
         from_user = message.from_user
@@ -290,7 +289,6 @@ async def get_notes(message: Message, state: FSMContext):
             await session.commit()
     await message.answer("✅ Самочувствие отмечено!")
     await state.clear()
-    # Возвращаемся в меню цикла
     await cycle_menu(await create_callback(message))
 
 @router.callback_query(F.data == "cycle_stats")
@@ -333,7 +331,6 @@ async def cycle_calendar(callback: CallbackQuery):
         today = date.today()
         year, month = today.year, today.month
         cal = monthcalendar(year, month)
-        # Генерируем календарь
         text = f"📅 <b>Календарь цикла на {month:02d}.{year}</b>\n\n"
         text += "Пн Вт Ср Чт Пт Сб Вс\n"
         for week in cal:
