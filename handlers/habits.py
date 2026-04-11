@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from datetime import datetime, date
 from sqlalchemy import select
 from db.db import async_session
-from db.models import Habit, HabitLog
+from db.models import User, Habit, HabitLog
 from keyboards.inline import back_button, habit_frequency_keyboard
 from keyboards.reply import main_reply_menu
 
@@ -16,7 +16,7 @@ class HabitForm(StatesGroup):
     description = State()
     time = State()
     frequency = State()
-    month_days = State()  # для чисел месяца
+    month_days = State()
 
 @router.callback_query(F.data == "habits")
 async def habits_menu(callback: CallbackQuery):
@@ -68,10 +68,9 @@ async def get_frequency(callback: CallbackQuery, state: FSMContext):
         return
     elif choice == "freq_custom":
         await callback.message.edit_text("Введите номера дней недели через пробел (1=пн, 7=вс):")
-        await state.set_state(HabitForm.month_days)  # переиспользуем состояние
+        await state.set_state(HabitForm.month_days)
         await callback.answer()
         return
-    # Обработка предустановленных вариантов
     freq_map = {
         "freq_everyday": "everyday",
         "freq_135": "1,3,5",
@@ -85,11 +84,9 @@ async def get_frequency(callback: CallbackQuery, state: FSMContext):
 @router.message(HabitForm.month_days)
 async def get_custom_days(message: Message, state: FSMContext):
     text = message.text.strip()
-    # Проверяем, что введены числа
     if text.replace(",", " ").replace(" ", "").isdigit():
         frequency = f"month_days:{text}"
     else:
-        # пробуем как дни недели
         parts = text.split()
         if all(p.isdigit() and 1 <= int(p) <= 7 for p in parts):
             frequency = ",".join(parts)
@@ -138,7 +135,6 @@ async def list_habits(callback: CallbackQuery):
         await callback.message.edit_text(text, reply_markup=back_button("habits"))
     await callback.answer()
 
-# Обработка выполнения привычки (через команду /done_123)
 @router.message(lambda m: m.text and m.text.startswith("/done_"))
 async def complete_habit(message: Message):
     habit_id = int(message.text.split("_")[1])
