@@ -1,41 +1,58 @@
-from aiogram import Router, F
+ from aiogram import Router, F
+from aiogram.types import Message
 from aiogram.filters import CommandStart
-from aiogram.types import Message, CallbackQuery
-from sqlalchemy import select
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+
 from db.db import async_session
 from db.models import User
-from keyboards.reply import main_reply_menu
-from keyboards.inline import back_button
+from sqlalchemy import select
+from keyboards.reply import main_kb
+from config import ADMIN_ID
 
 router = Router()
 
-@router.message(CommandStart())
-async def cmd_start(message: Message):
-    tg_id = message.from_user.id
-    async with async_session() as session:
-        result = await session.execute(select(User).where(User.tg_id == tg_id))
-        user = result.scalar_one_or_none()
-        if not user:
-            user = User(tg_id=tg_id, name=message.from_user.full_name)
-            session.add(user)
-            await session.commit()
-        is_admin = (tg_id == 8666952157)  # твой ID
-        await message.answer(
-            f"💜 Привет, {user.name}! Я ЛЮМИ — твой личный помощник.",
-            reply_markup=main_reply_menu(is_admin=is_admin)
-        )
+class Registration(StatesGroup):
+    waiting_for_name = State()
 
-@router.callback_query(F.data == "start")
-async def back_to_menu(callback: CallbackQuery):
-    tg_id = callback.from_user.id
-    is_admin = (tg_id == 8666952157)
-    await callback.message.edit_text(
-        "💜 Главное меню:",
-        reply_markup=back_button("start")
+@router.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext):
+    async with async_session() as session:
+        # Проверяем, есть ли пользователь в базе
+        user = await session.scalar(select(User).where(User.tg_id == message.from_user.id))
+        
+        if user:
+            # Если уже есть — просто приветствуем
+            await message.answer(
+                f"Рада снова тебя видеть, <b>{user.name}</b>! 💜\nЧем займемся сегодня?",
+                reply_markup=main_kb(message.from_user.id, ADMIN_ID),
+                parse_mode="HTML"
+            )
+        else:
+            # Если нет — начинаем знакомство
+            await message.answer(
+                "Привет! 🎆 Я <b>ЛЮМИ</b>, твой персональный ассистент.\n"
+                "Давай познакомимся. Как мне к тебе обращаться?",
+                parse_mode="HTML"
+            )
+            await state.set_state(Registration.waiting_for_name)
+
+@router.message(Registration.waiting_for_name)
+async def get_name(message: Message, state: FSMContext):
+    name = message.text
+    
+    async with async_session() as session:
+        new_user = User(
+            tg_id=message.from_user.id,
+            name=name
+        )
+        session.add(new_user)
+        await session.commit()
+    
+    await state.clear()
+    await message.answer(
+        f"Приятно познакомиться, <b>{name}</b>! ✨\n"
+        "Я создала твой профиль. Теперь тебе доступны все мои функции.",
+        reply_markup=main_kb(message.from_user.id, ADMIN_ID),
+        parse_mode="HTML"
     )
-    # Отправляем новое сообщение с reply-меню, так как edit_text не меняет reply-кнопки
-    await callback.message.answer(
-        "Выберите действие:",
-        reply_markup=main_reply_menu(is_admin=is_admin)
-    )
-    await callback.answer()
