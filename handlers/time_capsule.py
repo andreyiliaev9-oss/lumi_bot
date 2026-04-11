@@ -71,35 +71,55 @@ async def capsule_get_date(message: Message, state: FSMContext):
     await state.clear()
 
 @router.callback_query(F.data == "capsule_list")
-async def capsule_list(callback: CallbackQuery):
+async def capsule_list(callback: CallbackQuery, page: int = 0):
     async with async_session() as session:
         user = await session.scalar(select(User).where(User.tg_id == callback.from_user.id))
         if not user:
             await callback.answer("Ошибка")
             return
+        total = await session.scalar(select(TimeCapsule.id).where(TimeCapsule.user_id == user.id).count())
+        if total == 0:
+            await callback.message.edit_text("У вас нет капсул времени.", reply_markup=back_button("time_capsule"))
+            await callback.answer()
+            return
+        offset = page * 5
         capsules = await session.execute(
             select(TimeCapsule).where(TimeCapsule.user_id == user.id)
             .order_by(TimeCapsule.open_date)
+            .offset(offset).limit(5)
         )
         caps_list = capsules.scalars().all()
-        if not caps_list:
-            text = "У вас нет капсул времени."
-            await callback.message.edit_text(text, reply_markup=back_button("time_capsule"))
-        else:
-            text = "📦 <b>Ваши капсулы времени:</b>\n\n"
-            for c in caps_list:
-                status = "🔓 Открыта" if c.is_opened else f"🔒 Откроется {c.open_date.strftime('%d.%m.%Y')}"
-                text += f"• <b>{c.title}</b> — {status}\n"
-                text += f"  ID: {c.id} | Команды: /viewcapsule_{c.id} /delcapsule_{c.id}\n\n"
-            await callback.message.edit_text(text, reply_markup=back_button("time_capsule"))
+        text = "📦 <b>Ваши капсулы времени:</b>\n\n"
+        kb = InlineKeyboardMarkup(inline_keyboard=[])
+        for c in caps_list:
+            status = "🔓 Открыта" if c.is_opened else f"🔒 Откроется {c.open_date.strftime('%d.%m.%Y')}"
+            text += f"• <b>{c.title}</b> — {status}\n"
+            # Добавляем инлайн-кнопки для каждой капсулы
+            kb.inline_keyboard.append([
+                InlineKeyboardButton(text=f"📖 {c.title}", callback_data=f"view_capsule_{c.id}"),
+                InlineKeyboardButton(text="🗑", callback_data=f"del_capsule_{c.id}")
+            ])
+        # Пагинация
+        if page > 0:
+            kb.inline_keyboard.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"capsule_page_{page-1}")])
+        if (page+1)*5 < total:
+            kb.inline_keyboard.append([InlineKeyboardButton(text="Вперед ▶️", callback_data=f"capsule_page_{page+1}")])
+        kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="time_capsule")])
+        await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
-@router.message(lambda m: m.text and m.text.startswith("/viewcapsule_"))
-async def view_capsule(message: Message):
-    capsule_id = int(message.text.split("_")[1])
+@router.callback_query(F.data.startswith("capsule_page_"))
+async def capsule_page(callback: CallbackQuery):
+    page = int(callback.data.split("_")[2])
+    await capsule_list(callback, page)
+
+@router.callback_query(F.data.startswith("view_capsule_"))
+async def view_capsule(callback: CallbackQuery):
+    capsule_id = int(callback.data.split("_")[2])
     async with async_session() as session:
-        user = await session.scalar(select(User).where(User.tg_id == message.from_user.id))
+        user = await session.scalar(select(User).where(User.tg_id == callback.from_user.id))
         if not user:
+            await callback.answer("Ошибка")
             return
         capsule = await session.get(TimeCapsule, capsule_id)
         if capsule and capsule.user_id == user.id:
@@ -107,21 +127,24 @@ async def view_capsule(message: Message):
                 text = f"<b>📦 {capsule.title}</b>\n\n{capsule.content}\n\n📅 Создана: {capsule.created_at.strftime('%d.%m.%Y')}\n🔓 Открыта: {capsule.open_date.strftime('%d.%m.%Y')}"
             else:
                 text = f"🔒 Эта капсула откроется {capsule.open_date.strftime('%d.%m.%Y')}. Загляните позже."
-            await message.answer(text)
+            await callback.message.edit_text(text, reply_markup=back_button("capsule_list"))
         else:
-            await message.answer("Капсула не найдена.")
+            await callback.answer("Капсула не найдена")
+    await callback.answer()
 
-@router.message(lambda m: m.text and m.text.startswith("/delcapsule_"))
-async def delete_capsule(message: Message):
-    capsule_id = int(message.text.split("_")[1])
+@router.callback_query(F.data.startswith("del_capsule_"))
+async def delete_capsule(callback: CallbackQuery):
+    capsule_id = int(callback.data.split("_")[2])
     async with async_session() as session:
-        user = await session.scalar(select(User).where(User.tg_id == message.from_user.id))
+        user = await session.scalar(select(User).where(User.tg_id == callback.from_user.id))
         if not user:
+            await callback.answer("Ошибка")
             return
         capsule = await session.get(TimeCapsule, capsule_id)
         if capsule and capsule.user_id == user.id:
             await session.delete(capsule)
             await session.commit()
-            await message.answer("🗑 Капсула удалена.")
+            await callback.answer("🗑 Капсула удалена")
+            await capsule_list(callback)
         else:
-            await message.answer("Капсула не найдена.")
+            await callback.answer("Капсула не найдена")
