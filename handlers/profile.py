@@ -12,7 +12,6 @@ router = Router()
 async def show_profile(message: Message):
     tg_id = message.from_user.id
 
-    # Фото профиля (если есть)
     avatar = None
     try:
         photos = await message.bot.get_user_profile_photos(tg_id, limit=1)
@@ -27,13 +26,11 @@ async def show_profile(message: Message):
             await message.answer("Ошибка: пользователь не найден")
             return
 
-        # Статистика
         habits_done = await session.scalar(select(func.count(HabitLog.id)).where(HabitLog.user_id == user.id, HabitLog.completed == True))
         habits_skipped = await session.scalar(select(func.count(HabitLog.id)).where(HabitLog.user_id == user.id, HabitLog.skipped == True))
         events_done = await session.scalar(select(func.count(Event.id)).where(Event.user_id == user.id, Event.date < date.today()))
         diary_entries = await session.scalar(select(func.count(DiaryEntry.id)).where(DiaryEntry.user_id == user.id))
 
-        # Серия (streak) – последние дни с активностью
         streak = 0
         current = date.today()
         while True:
@@ -46,11 +43,11 @@ async def show_profile(message: Message):
                 break
 
         text = (
-            f"<font color='purple'>👤 {user.name}</font>\n"
+            f"<b>👤 {user.name}</b>\n"
             f"🆔 ID: {tg_id}\n"
             f"📅 Регистрация: {user.reg_date.strftime('%d.%m.%Y')}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"📊 <font color='purple'>Статистика</font>\n"
+            f"📊 <b>Статистика</b>\n"
             f"✅ Выполнено привычек: {habits_done or 0}\n"
             f"❌ Пропущено: {habits_skipped or 0}\n"
             f"📌 Выполнено задач: {events_done or 0}\n"
