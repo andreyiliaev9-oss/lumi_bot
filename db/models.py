@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Date
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, Date, BigInteger
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 
@@ -7,7 +7,7 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True)
-    tg_id = Column(Integer, unique=True)
+    tg_id = Column(BigInteger, unique=True) # Используем BigInteger для ID телеграма
     name = Column(String)
     reg_date = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
@@ -18,9 +18,13 @@ class User(Base):
     morning_text = Column(String, default="Доброе утро! ☀️")
     evening_text = Column(String, default="Спокойной ночи! 🌙")
     pin_hash = Column(String, nullable=True)
-    # Для приватной зоны: храним хеш PIN-кода
     private_pin_hash = Column(String, nullable=True)
     private_session_expires = Column(DateTime, nullable=True)
+    
+    # --- НОВЫЕ ПОЛЯ ДЛЯ ЦИКЛА ---
+    cycle_start_date = Column(Date, nullable=True)
+    cycle_length = Column(Integer, default=28)
+    period_length = Column(Integer, default=5)
 
 class Compliment(Base):
     __tablename__ = 'compliments'
@@ -36,7 +40,7 @@ class Habit(Base):
     name = Column(String)
     description = Column(Text)
     time = Column(String)
-    frequency = Column(String)  # 'everyday', '1,3,5', '2,4', '6,7', 'custom_days', 'month_days:1,15'
+    frequency = Column(String)
     created_at = Column(DateTime, default=datetime.now)
     is_active = Column(Boolean, default=True)
 
@@ -77,7 +81,7 @@ class CycleLog(Base):
 class CycleTip(Base):
     __tablename__ = 'cycle_tips'
     id = Column(Integer, primary_key=True)
-    phase = Column(String)  # menstruation, follicular, ovulation, luteal
+    phase = Column(String)
     tip = Column(Text)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now)
@@ -107,6 +111,6 @@ class TimeCapsule(Base):
     user_id = Column(Integer, ForeignKey('users.id'))
     title = Column(String)
     content = Column(Text)
-    open_date = Column(Date)  # когда открыть
+    open_date = Column(Date)
     created_at = Column(DateTime, default=datetime.now)
     is_opened = Column(Boolean, default=False)
