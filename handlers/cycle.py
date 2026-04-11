@@ -1,6 +1,6 @@
 import io
 import csv
-from datetime import date, timedelta
+from datetime import datetime, date, timedelta
 from calendar import monthcalendar
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
@@ -9,11 +9,10 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select, func
 from db.db import async_session
 from db.models import User, CycleLog, CycleTip
-from keyboards.inline import back_button
+from keyboards.inline import back_button, cycle_phases_keyboard
 
 router = Router()
 
-# Состояния для FSM
 class CycleForm(StatesGroup):
     start_date = State()
     cycle_length = State()
@@ -29,7 +28,6 @@ class FeelingForm(StatesGroup):
     acne = State()
     notes = State()
 
-# ---------- Вспомогательные функции ----------
 def get_phase_key(cycle_day: int, period_length: int) -> str:
     if cycle_day <= period_length:
         return "menstruation"
@@ -41,18 +39,17 @@ def get_phase_key(cycle_day: int, period_length: int) -> str:
         return "luteal"
 
 def get_phase_emoji(phase: str) -> str:
-    return {"menstruation":"🩸", "follicular":"🌱", "ovulation":"🥚", "luteal":"🌙"}.get(phase, "📌")
+    return {"menstruation": "🩸", "follicular": "🌱", "ovulation": "🥚", "luteal": "🌙"}.get(phase, "📌")
 
-# ---------- Главное меню цикла ----------
 @router.callback_query(F.data == "cycle")
 async def cycle_menu(callback: CallbackQuery):
     async with async_session() as session:
-        user = await session.get(User, callback.from_user.id)
-        if not user.cycle_start_date:
-            text = "🌸 Трекер цикла не настроен.\nУкажите дату начала последних месячных и параметры цикла."
+        user = await session.scalar(select(User).where(User.tg_id == callback.from_user.id))
+        if not user or not user.cycle_start_date:
+            text = "🌸 Трекер цикла не настроен.\nУкажите дату начала последних месячных."
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📅 Настроить цикл", callback_data="setup_cycle")],
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="start")]
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="exit_private")]
             ])
             await callback.message.edit_text(text, reply_markup=kb)
             await callback.answer()
@@ -64,7 +61,6 @@ async def cycle_menu(callback: CallbackQuery):
         phase_key = get_phase_key(cycle_day, user.period_length)
         phase_emoji = get_phase_emoji(phase_key)
 
-        # Получаем совет из БД
         tip_record = await session.scalar(
             select(CycleTip).where(CycleTip.phase == phase_key, CycleTip.is_active == True)
         )
@@ -73,61 +69,61 @@ async def cycle_menu(callback: CallbackQuery):
         next_period = user.cycle_start_date + timedelta(days=user.cycle_length)
         days_left = (next_period - today).days
 
-        # Проверка на ПМС (за 5 дней до месячных) и отправка уведомления, если не отправляли сегодня
-        if days_left <= 5 and days_left > 0:
+        # ПМС-уведомление (за 5 дней)
+        if 0 < days_left <= 5:
             if not user.last_pms_notification or user.last_pms_notification < today:
                 await callback.message.answer(
-                    f"🌙 Внимание! Через {days_left} дня(ей) ожидаются месячные.\n"
-                    "Будьте внимательны к себе, возможны изменения настроения и самочувствия."
+                    f"🌙 Внимание! Через {days_left} дн. ожидаются месячные.\n"
+                    "Будьте внимательны к себе."
                 )
                 user.last_pms_notification = today
                 await session.commit()
 
-        text = (f"{phase_emoji} <b>День цикла: {cycle_day}</b>\n"
-                f"📌 Фаза: {phase_key.capitalize()}\n"
-                f"📅 Следующие месячные: {next_period.strftime('%d.%m.%Y')}\n"
-                f"⏳ Осталось дней: {days_left}\n"
-                f"💡 Совет: {advice}\n\n"
-                "Хочешь отметить самочувствие?")
-
+        text = (
+            f"{phase_emoji} <b>День цикла: {cycle_day}</b>\n"
+            f"📌 Фаза: {phase_key.capitalize()}\n"
+            f"📅 Следующие месячные: {next_period.strftime('%d.%m.%Y')}\n"
+            f"⏳ Осталось дней: {days_left}\n"
+            f"💡 Совет: {advice}\n\n"
+            "Выберите действие:"
+        )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="😊 Отметить самочувствие", callback_data="log_feeling")],
             [InlineKeyboardButton(text="📊 Статистика", callback_data="cycle_stats")],
             [InlineKeyboardButton(text="📅 График цикла", callback_data="cycle_calendar")],
-            [InlineKeyboardButton(text="📎 Экспорт данных (CSV)", callback_data="export_cycle_data")],
+            [InlineKeyboardButton(text="📎 Экспорт CSV", callback_data="export_cycle_data")],
             [InlineKeyboardButton(text="💡 Все советы", callback_data="all_tips")],
-            [InlineKeyboardButton(text="⚙️ Изменить настройки цикла", callback_data="setup_cycle")],
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="start")]
+            [InlineKeyboardButton(text="⚙️ Изменить настройки", callback_data="setup_cycle")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="exit_private")]
         ])
         await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
-# ---------- Настройка цикла ----------
 @router.callback_query(F.data == "setup_cycle")
 async def setup_cycle_start(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Введите дату начала последних месячных в формате ГГГГ-ММ-ДД:")
+    await callback.message.edit_text("Введите дату начала последних месячных в формате <b>ДД.ММ.ГГГГ</b> (например, 10.04.2026):")
     await state.set_state(CycleForm.start_date)
     await callback.answer()
 
 @router.message(CycleForm.start_date)
 async def get_start_date(message: Message, state: FSMContext):
     try:
-        start = datetime.strptime(message.text, "%Y-%m-%d").date()
+        start = datetime.strptime(message.text, "%d.%m.%Y").date()
         if start > date.today():
-            await message.answer("Дата не может быть в будущем. Введите корректную дату.")
+            await message.answer("⚠️ Дата не может быть в будущем.")
             return
         await state.update_data(start_date=start)
-        await message.answer("Введите среднюю длительность вашего цикла (в днях, обычно 28):")
+        await message.answer("Введите среднюю длительность цикла (в днях, обычно 28):")
         await state.set_state(CycleForm.cycle_length)
     except:
-        await message.answer("Неверный формат. Используйте ГГГГ-ММ-ДД")
+        await message.answer("❌ Неверный формат. Используйте ДД.ММ.ГГГГ")
 
 @router.message(CycleForm.cycle_length)
 async def get_cycle_length(message: Message, state: FSMContext):
     try:
         length = int(message.text)
         if length < 21 or length > 45:
-            await message.answer("Обычно цикл от 21 до 45 дней. Введите значение ещё раз:")
+            await message.answer("Обычно цикл от 21 до 45 дней. Попробуйте ещё раз.")
             return
         await state.update_data(cycle_length=length)
         await message.answer("Введите длительность месячных (в днях):")
@@ -140,22 +136,33 @@ async def get_period_length(message: Message, state: FSMContext):
     try:
         period = int(message.text)
         if period < 2 or period > 10:
-            await message.answer("Обычно 3-7 дней. Введите ещё раз:")
+            await message.answer("Обычно 3-7 дней. Попробуйте ещё раз.")
             return
         await state.update_data(period_length=period)
         data = await state.get_data()
         async with async_session() as session:
-            user = await session.get(User, message.from_user.id)
-            user.cycle_start_date = data['start_date']
-            user.cycle_length = data['cycle_length']
-            user.period_length = period
-            await session.commit()
-        await message.answer("✅ Настройки цикла сохранены!", reply_markup=back_button("cycle"))
+            user = await session.scalar(select(User).where(User.tg_id == message.from_user.id))
+            if user:
+                user.cycle_start_date = data['start_date']
+                user.cycle_length = data['cycle_length']
+                user.period_length = period
+                await session.commit()
+        await message.answer("✅ Настройки цикла сохранены!")
         await state.clear()
+        # Возвращаемся в меню цикла
+        await cycle_menu(await create_callback(message))
     except:
         await message.answer("Введите число.")
 
-# ---------- Отметка самочувствия (с симптомами) ----------
+# Вспомогательная функция для имитации callback (чтобы вернуться в меню)
+async def create_callback(message: Message):
+    class FakeCallback:
+        from_user = message.from_user
+        message = message
+        async def answer(self):
+            pass
+    return FakeCallback()
+
 @router.callback_query(F.data == "log_feeling")
 async def log_feeling_start(callback: CallbackQuery, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -165,7 +172,7 @@ async def log_feeling_start(callback: CallbackQuery, state: FSMContext):
          InlineKeyboardButton(text="4 - Хорошо", callback_data="mood_4"),
          InlineKeyboardButton(text="5 - Отлично", callback_data="mood_5")]
     ])
-    await callback.message.edit_text("Оцените своё настроение (1-5):", reply_markup=kb)
+    await callback.message.edit_text("Оцените настроение (1-5):", reply_markup=kb)
     await state.set_state(FeelingForm.mood)
     await callback.answer()
 
@@ -180,7 +187,7 @@ async def get_mood(callback: CallbackQuery, state: FSMContext):
          InlineKeyboardButton(text="4 - Сильная", callback_data="pain_4"),
          InlineKeyboardButton(text="5 - Очень сильная", callback_data="pain_5")]
     ])
-    await callback.message.edit_text("Оцените уровень боли (1-5):", reply_markup=kb)
+    await callback.message.edit_text("Уровень боли (1-5):", reply_markup=kb)
     await state.set_state(FeelingForm.pain)
     await callback.answer()
 
@@ -195,7 +202,7 @@ async def get_pain(callback: CallbackQuery, state: FSMContext):
          InlineKeyboardButton(text="4 - Высоко", callback_data="energy_4"),
          InlineKeyboardButton(text="5 - Очень высоко", callback_data="energy_5")]
     ])
-    await callback.message.edit_text("Оцените уровень энергии (1-5):", reply_markup=kb)
+    await callback.message.edit_text("Уровень энергии (1-5):", reply_markup=kb)
     await state.set_state(FeelingForm.energy)
     await callback.answer()
 
@@ -210,7 +217,7 @@ async def get_energy(callback: CallbackQuery, state: FSMContext):
          InlineKeyboardButton(text="4 - Хорошо", callback_data="sleep_4"),
          InlineKeyboardButton(text="5 - Отлично", callback_data="sleep_5")]
     ])
-    await callback.message.edit_text("Оцените качество сна (1-5):", reply_markup=kb)
+    await callback.message.edit_text("Качество сна (1-5):", reply_markup=kb)
     await state.set_state(FeelingForm.sleep)
     await callback.answer()
 
@@ -218,7 +225,6 @@ async def get_energy(callback: CallbackQuery, state: FSMContext):
 async def get_sleep(callback: CallbackQuery, state: FSMContext):
     sleep = int(callback.data.split("_")[1])
     await state.update_data(sleep=sleep)
-    # Дополнительные симптомы
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🤕 Головная боль", callback_data="headache_yes"),
          InlineKeyboardButton(text="✅ Нет", callback_data="headache_no")],
@@ -227,11 +233,10 @@ async def get_sleep(callback: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="😖 Акне", callback_data="acne_yes"),
          InlineKeyboardButton(text="✅ Нет", callback_data="acne_no")]
     ])
-    await callback.message.edit_text("Отметьте дополнительные симптомы:", reply_markup=kb)
+    await callback.message.edit_text("Отметьте симптомы:", reply_markup=kb)
     await state.set_state(FeelingForm.headache)
     await callback.answer()
 
-# Обработка симптомов
 @router.callback_query(FeelingForm.headache)
 async def get_headache(callback: CallbackQuery, state: FSMContext):
     val = callback.data.split("_")[1] == "yes"
@@ -267,38 +272,45 @@ async def get_notes(message: Message, state: FSMContext):
     notes = None if message.text == "-" else message.text
     data = await state.get_data()
     async with async_session() as session:
-        log = CycleLog(
-            user_id=message.from_user.id,
-            date=date.today(),
-            mood=data.get('mood'),
-            pain=data.get('pain'),
-            energy=data.get('energy'),
-            sleep=data.get('sleep'),
-            headache=data.get('headache', False),
-            bloating=data.get('bloating', False),
-            acne=data.get('acne', False),
-            notes=notes
-        )
-        session.add(log)
-        await session.commit()
-    await message.answer("✅ Самочувствие отмечено! Спасибо.", reply_markup=back_button("cycle"))
+        user = await session.scalar(select(User).where(User.tg_id == message.from_user.id))
+        if user:
+            log = CycleLog(
+                user_id=user.id,
+                date=date.today(),
+                mood=data.get('mood'),
+                pain=data.get('pain'),
+                energy=data.get('energy'),
+                sleep=data.get('sleep'),
+                headache=data.get('headache', False),
+                bloating=data.get('bloating', False),
+                acne=data.get('acne', False),
+                notes=notes
+            )
+            session.add(log)
+            await session.commit()
+    await message.answer("✅ Самочувствие отмечено!")
     await state.clear()
+    # Возвращаемся в меню цикла
+    await cycle_menu(await create_callback(message))
 
-# ---------- Статистика (последние записи) ----------
 @router.callback_query(F.data == "cycle_stats")
 async def cycle_stats(callback: CallbackQuery):
     async with async_session() as session:
+        user = await session.scalar(select(User).where(User.tg_id == callback.from_user.id))
+        if not user:
+            await callback.answer("Ошибка")
+            return
         logs = await session.execute(
-            select(CycleLog).where(CycleLog.user_id == callback.from_user.id)
+            select(CycleLog).where(CycleLog.user_id == user.id)
             .order_by(CycleLog.date.desc()).limit(10)
         )
         logs_list = logs.scalars().all()
         if not logs_list:
-            text = "Нет данных о самочувствии за последние дни."
+            text = "Нет данных о самочувствии."
         else:
-            text = "📊 <b>Последние записи самочувствия:</b>\n"
+            text = "📊 <b>Последние записи:</b>\n"
             for log in logs_list:
-                text += f"\n📅 {log.date}\n"
+                text += f"\n📅 {log.date.strftime('%d.%m.%Y')}\n"
                 text += f"😊 Настроение: {log.mood} | 😖 Боль: {log.pain} | ⚡ Энергия: {log.energy} | 😴 Сон: {log.sleep}\n"
                 symp = []
                 if log.headache: symp.append("🤕")
@@ -311,37 +323,17 @@ async def cycle_stats(callback: CallbackQuery):
         await callback.message.edit_text(text, reply_markup=back_button("cycle"))
     await callback.answer()
 
-# ---------- Календарь цикла ----------
 @router.callback_query(F.data == "cycle_calendar")
 async def cycle_calendar(callback: CallbackQuery):
     async with async_session() as session:
-        user = await session.get(User, callback.from_user.id)
-        if not user.cycle_start_date:
+        user = await session.scalar(select(User).where(User.tg_id == callback.from_user.id))
+        if not user or not user.cycle_start_date:
             await callback.answer("Сначала настройте цикл")
             return
         today = date.today()
-        # Покажем текущий месяц
         year, month = today.year, today.month
         cal = monthcalendar(year, month)
-        # Определим дни с месячными в этом месяце
-        # Для простоты: для каждого дня в месяце определим, является ли он днём месячных
-        # Найдём первый день цикла в этом месяце
-        first_day_of_month = date(year, month, 1)
-        last_day_of_month = date(year, month, 28) if month == 2 else date(year, month, 31)  # упрощённо
-        # Вычислим цикл на каждый день
-        month_days = []
-        for day_num in range(1, 32):
-            try:
-                d = date(year, month, day_num)
-            except:
-                continue
-            delta = (d - user.cycle_start_date).days
-            cycle_day = (delta % user.cycle_length) + 1
-            is_period = cycle_day <= user.period_length
-            is_ovulation = cycle_day == user.cycle_length // 2
-            month_days.append((d, cycle_day, is_period, is_ovulation))
-
-        # Формируем текстовый календарь
+        # Генерируем календарь
         text = f"📅 <b>Календарь цикла на {month:02d}.{year}</b>\n\n"
         text += "Пн Вт Ср Чт Пт Сб Вс\n"
         for week in cal:
@@ -350,33 +342,32 @@ async def cycle_calendar(callback: CallbackQuery):
                 if day == 0:
                     line += "   "
                 else:
-                    # Найдём статус дня
                     d = date(year, month, day)
-                    # Проверим, есть ли этот день в month_days
-                    status = None
-                    for md, cycle_day, is_period, is_ovulation in month_days:
-                        if md == d:
-                            if is_period:
-                                status = "🩸"
-                            elif is_ovulation:
-                                status = "🥚"
-                            else:
-                                status = "•"
-                            break
-                    if status is None:
-                        status = " "
+                    delta = (d - user.cycle_start_date).days
+                    cycle_day = (delta % user.cycle_length) + 1
+                    is_period = cycle_day <= user.period_length
+                    is_ovulation = cycle_day == user.cycle_length // 2
+                    if is_period:
+                        status = "🩸"
+                    elif is_ovulation:
+                        status = "🥚"
+                    else:
+                        status = "•"
                     line += f"{day:2d}{status} "
             text += line + "\n"
-        text += "\n🩸 — месячные, 🥚 — овуляция, • — другие дни"
+        text += "\n🩸 — месячные, 🥚 — овуляция"
         await callback.message.edit_text(text, reply_markup=back_button("cycle"))
     await callback.answer()
 
-# ---------- Экспорт данных в CSV ----------
 @router.callback_query(F.data == "export_cycle_data")
 async def export_cycle_data(callback: CallbackQuery):
     async with async_session() as session:
+        user = await session.scalar(select(User).where(User.tg_id == callback.from_user.id))
+        if not user:
+            await callback.answer("Ошибка")
+            return
         logs = await session.execute(
-            select(CycleLog).where(CycleLog.user_id == callback.from_user.id)
+            select(CycleLog).where(CycleLog.user_id == user.id)
             .order_by(CycleLog.date)
         )
         logs_list = logs.scalars().all()
@@ -388,7 +379,7 @@ async def export_cycle_data(callback: CallbackQuery):
         writer.writerow(["Дата", "Настроение", "Боль", "Энергия", "Сон", "Головная боль", "Вздутие", "Акне", "Заметки"])
         for log in logs_list:
             writer.writerow([
-                log.date,
+                log.date.strftime('%d.%m.%Y'),
                 log.mood,
                 log.pain,
                 log.energy,
@@ -405,7 +396,6 @@ async def export_cycle_data(callback: CallbackQuery):
         )
     await callback.answer()
 
-# ---------- Все советы (просмотр для пользователя) ----------
 @router.callback_query(F.data == "all_tips")
 async def show_all_tips(callback: CallbackQuery):
     async with async_session() as session:
