@@ -5,7 +5,7 @@ from aiogram.fsm.state import State, StatesGroup
 from datetime import datetime, date
 from sqlalchemy import select
 from db.db import async_session
-from db.models import Event
+from db.models import User, Event
 from keyboards.inline import back_button
 
 router = Router()
@@ -19,11 +19,12 @@ class EventForm(StatesGroup):
 
 @router.callback_query(F.data == "planner")
 async def planner_menu(callback: CallbackQuery):
-    await callback.message.edit_text("📅 Планировщик:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+    kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Создать событие", callback_data="add_event")],
         [InlineKeyboardButton(text="📋 Мои события", callback_data="list_events")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="start")]
-    ]))
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="exit_private")]
+    ])
+    await callback.message.edit_text("📅 Планировщик", reply_markup=kb)
     await callback.answer()
 
 @router.callback_query(F.data == "add_event")
@@ -83,8 +84,12 @@ async def event_notify(callback: CallbackQuery, state: FSMContext):
     choice = callback.data
     data = await state.get_data()
     async with async_session() as session:
+        user = await session.scalar(select(User).where(User.tg_id == callback.from_user.id))
+        if not user:
+            await callback.answer("Ошибка")
+            return
         event = Event(
-            user_id=callback.from_user.id,
+            user_id=user.id,
             title=data['title'],
             description=data['description'],
             date=data['date'],
@@ -100,8 +105,12 @@ async def event_notify(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "list_events")
 async def list_events(callback: CallbackQuery):
     async with async_session() as session:
+        user = await session.scalar(select(User).where(User.tg_id == callback.from_user.id))
+        if not user:
+            await callback.answer("Ошибка")
+            return
         events = await session.execute(
-            select(Event).where(Event.user_id == callback.from_user.id, Event.date >= date.today())
+            select(Event).where(Event.user_id == user.id, Event.date >= date.today())
             .order_by(Event.date, Event.time)
         )
         events_list = events.scalars().all()
@@ -117,7 +126,7 @@ async def list_events(callback: CallbackQuery):
                     callback_data=f"event_{ev.id}"
                 )])
             kb.inline_keyboard.append([InlineKeyboardButton(text="🔙 Назад", callback_data="planner")])
-            await callback.message.edit_text("Выберите событие для редактирования или удаления:", reply_markup=kb)
+            await callback.message.edit_text("Выберите событие для управления:", reply_markup=kb)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("event_"))
@@ -125,8 +134,13 @@ async def manage_event(callback: CallbackQuery):
     event_id = int(callback.data.split("_")[1])
     async with async_session() as session:
         event = await session.get(Event, event_id)
-        if not event or event.user_id != callback.from_user.id:
+        if not event:
             await callback.answer("Событие не найдено")
+            return
+        # Проверим, что событие принадлежит пользователю
+        user = await session.scalar(select(User).where(User.tg_id == callback.from_user.id))
+        if not user or event.user_id != user.id:
+            await callback.answer("Нет доступа")
             return
         date_str = event.date.strftime("%d.%m.%Y")
         text = f"📌 <b>{event.title}</b>\n📝 {event.description or 'Нет описания'}\n📅 {date_str}"
@@ -135,8 +149,7 @@ async def manage_event(callback: CallbackQuery):
         if event.notify_before:
             text += f"\n⏰ Уведомление за {event.notify_before}"
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_{event_id}"),
-             InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_{event_id}")],
+            [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_{event_id}")],
             [InlineKeyboardButton(text="🔙 Назад", callback_data="list_events")]
         ])
         await callback.message.edit_text(text, reply_markup=kb)
@@ -147,7 +160,7 @@ async def delete_event(callback: CallbackQuery):
     event_id = int(callback.data.split("_")[1])
     async with async_session() as session:
         event = await session.get(Event, event_id)
-        if event and event.user_id == callback.from_user.id:
+        if event:
             await session.delete(event)
             await session.commit()
             await callback.answer("🗑 Событие удалено")
