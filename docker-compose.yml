@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  lumi-bot:
+    build: .
+    container_name: lumi-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_URL=sqlite:///data/lumi_bot.db
+  # Опционально: PostgreSQL для продакшена
+  # db:
+  #   image: postgres:15-alpine
+  #   container_name: lumi-db
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: lumi
+  #     POSTGRES_PASSWORD: lumi_password
+  #     POSTGRES_DB: lumi_bot
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+# volumes:
+#   postgres_data:
