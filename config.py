@@ -1,12 +1,9 @@
-# /root/lumi_bot/config.py
-
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Загружаем .env из корня проекта
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
@@ -43,7 +40,6 @@ def _build_settings() -> Settings:
         raise ValueError("BOT_TOKEN is required in .env")
 
     admin_id = _to_int(os.getenv("ADMIN_ID"), "ADMIN_ID")
-
     database_url = (os.getenv("DATABASE_URL") or "sqlite:///lumi_bot.db").strip()
     debug = _to_bool(os.getenv("DEBUG"), default=False)
     timezone = (os.getenv("TIMEZONE") or "Europe/Moscow").strip()
@@ -63,7 +59,6 @@ def _build_settings() -> Settings:
 
 settings = _build_settings()
 
-# XP -> уровень
 LEVEL_THRESHOLDS = {
     1: 0,
     2: 100,
