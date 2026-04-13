@@ -1,73 +1,60 @@
+cat > config.py << 'EOF'
 import os
-from dataclasses import dataclass
-from pathlib import Path
-
 from dotenv import load_dotenv
 
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
+load_dotenv()
 
 
-def _to_bool(value: str | None, default: bool = False) -> bool:
+def str_to_bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    return value.strip().lower() in ("1", "true", "yes", "y", "on")
 
 
-def _to_int(value: str | None, field_name: str) -> int:
-    if value is None or value.strip() == "":
-        raise ValueError(f"{field_name} is required in .env")
-    try:
-        return int(value)
-    except ValueError as exc:
-        raise ValueError(f"{field_name} must be integer, got: {value}") from exc
-
-
-@dataclass(frozen=True)
 class Settings:
-    BOT_TOKEN: str
-    ADMIN_ID: int
-    DATABASE_URL: str
-    DEBUG: bool
-    TIMEZONE: str
-    MORNING_DEFAULT_TIME: str
-    NIGHT_DEFAULT_TIME: str
+    def __init__(self):
+        self.BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+        self.ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+        self.DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///lumi.db")
+        self.DEBUG = str_to_bool(os.getenv("DEBUG"), False)
+
+        self.TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
+        self.DEFAULT_MORNING_TIME = os.getenv("DEFAULT_MORNING_TIME", "08:00")
+        self.DEFAULT_NIGHT_TIME = os.getenv("DEFAULT_NIGHT_TIME", "22:00")
+
+        self.PIN_LENGTH = int(os.getenv("PIN_LENGTH", "4"))
+        self.PIN_MAX_ATTEMPTS = int(os.getenv("PIN_MAX_ATTEMPTS", "3"))
+        self.PIN_BLOCK_MINUTES = int(os.getenv("PIN_BLOCK_MINUTES", "5"))
+        self.PRIVATE_AUTO_LOGOUT_MINUTES = int(os.getenv("PRIVATE_AUTO_LOGOUT_MINUTES", "5"))
+
+        self.HABIT_MAX_REPEAT = int(os.getenv("HABIT_MAX_REPEAT", "3"))
+        self.HABIT_REPEAT_INTERVAL_MINUTES = int(os.getenv("HABIT_REPEAT_INTERVAL_MINUTES", "60"))
+
+        self.DEFAULT_QUIET_START = os.getenv("DEFAULT_QUIET_START", "22:00")
+        self.DEFAULT_QUIET_END = os.getenv("DEFAULT_QUIET_END", "09:00")
+
+        self.SCHEDULER_ENABLED = str_to_bool(os.getenv("SCHEDULER_ENABLED"), True)
+
+    def validate(self):
+        if not self.BOT_TOKEN:
+            raise ValueError("BOT_TOKEN не найден. Добавь его в .env")
+        if self.ADMIN_ID < 0:
+            raise ValueError("ADMIN_ID должен быть >= 0")
 
 
-def _build_settings() -> Settings:
-    bot_token = (os.getenv("BOT_TOKEN") or "").strip()
-    if not bot_token:
-        raise ValueError("BOT_TOKEN is required in .env")
-
-    admin_id = _to_int(os.getenv("ADMIN_ID"), "ADMIN_ID")
-    database_url = (os.getenv("DATABASE_URL") or "sqlite:///lumi_bot.db").strip()
-    debug = _to_bool(os.getenv("DEBUG"), default=False)
-    timezone = (os.getenv("TIMEZONE") or "Europe/Moscow").strip()
-    morning_time = (os.getenv("MORNING_DEFAULT_TIME") or "08:00").strip()
-    night_time = (os.getenv("NIGHT_DEFAULT_TIME") or "22:00").strip()
-
-    return Settings(
-        BOT_TOKEN=bot_token,
-        ADMIN_ID=admin_id,
-        DATABASE_URL=database_url,
-        DEBUG=debug,
-        TIMEZONE=timezone,
-        MORNING_DEFAULT_TIME=morning_time,
-        NIGHT_DEFAULT_TIME=night_time,
-    )
-
-
-settings = _build_settings()
+settings = Settings()
+settings.validate()
 
 LEVEL_THRESHOLDS = {
     1: 0,
-    2: 100,
-    3: 250,
-    4: 450,
-    5: 700,
-    6: 1000,
-    7: 1400,
-    8: 1850,
-    9: 2350,
-    10: 2900,
+    2: 50,
+    3: 120,
+    4: 220,
+    5: 350,
+    6: 500,
+    7: 700,
+    8: 950,
+    9: 1250,
+    10: 1600,
 }
+EOF
